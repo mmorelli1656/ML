@@ -84,8 +84,8 @@ class ParallelGridSearch:
             model = clone(self.model)
             model.set_params(**param_comb)
             model.fit(X_train_scaled, y_train, 
-                      eval_set=[(X_val_scaled, y_val)],
-                      verbose=False
+                      # eval_set=[(X_val_scaled, y_val)],
+                      # verbose=False
                       )
 
             y_pred = model.predict(X_val_scaled)
@@ -129,6 +129,7 @@ class ParallelGridSearch:
         # Appiattisce la lista di liste
         return [item for sublist in all_results for item in sublist]
 
+
     def aggregate_results(self, results, metric_fn, use_proba=False):
         """
         Aggrega i risultati ottenuti da parallel_training, calcolando la metrica specificata
@@ -141,6 +142,7 @@ class ParallelGridSearch:
         """
         metric_scores = defaultdict(list)  # Dizionario per raccogliere i punteggi per ogni combinazione di parametri
     
+        start_time = time.time()
         # Itera su ciascun risultato dei fold (risultati della cross-validation)
         for res in results:
             y_true = self.y[res.val_idx]  # Etichette vere per la validazione
@@ -181,6 +183,66 @@ class ParallelGridSearch:
     
         # Ordina i risultati in base alla media del punteggio (decrescente) e resetta l'indice
         df_summary = df_summary.sort_values(by='mean_score', ascending=False).reset_index(drop=True)
+        
+        elapsed_time = time.time() - start_time
+        h, m = divmod(elapsed_time // 60, 60)
+        s = elapsed_time % 60
+        print(f"Aggregation time: {int(h)} h, {int(m)} min, {s:.2f} sec")
+    
+        return df_summary
+
+    def aggregate_results_parallel(self, results, metric_fn, use_proba=False, n_jobs=-1):
+        """
+        Aggrega i risultati in parallelo, calcolando la metrica specificata.
+        """
+    
+        def process_result(res):
+            y_true = self.y[res.val_idx]
+            y_pred = res.y_pred
+            y_pred_proba = res.y_pred_proba
+    
+            if use_proba:
+                if y_pred_proba is None:
+                    return None
+                score = metric_fn(y_true, y_pred_proba)
+            else:
+                score = metric_fn(y_true, y_pred)
+    
+            param_tuple = tuple(sorted(res.param_combination.items()))
+            return (param_tuple, score)
+    
+        start_time = time.time()
+    
+        # Parallelizza l'elaborazione dei risultati
+        processed = Parallel(n_jobs=n_jobs)(
+            delayed(process_result)(res) for res in tqdm(results)
+        )
+    
+        # Filtro i None (fold saltati)
+        processed = [p for p in processed if p is not None]
+    
+        # Costruisci dizionario aggregato
+        metric_scores = defaultdict(list)
+        for param_tuple, score in processed:
+            metric_scores[param_tuple].append(score)
+    
+        # Aggrega media e std
+        summary = []
+        for param_tuple, scores in metric_scores.items():
+            param_dict = dict(param_tuple)
+            param_dict.update({
+                'mean_score': np.mean(scores),
+                'std_score': np.std(scores)
+            })
+            summary.append(param_dict)
+    
+        df_summary = pd.DataFrame(summary)
+        df_summary = df_summary.sort_values(by='mean_score', ascending=False).reset_index(drop=True)
+    
+        elapsed_time = time.time() - start_time
+        h, m = divmod(elapsed_time // 60, 60)
+        s = elapsed_time % 60
+        print(f"Aggregation time: {int(h)} h, {int(m)} min, {s:.2f} sec")
     
         return df_summary
 
