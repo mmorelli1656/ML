@@ -14,6 +14,7 @@ from collections import namedtuple
 from sklearn.base import clone
 from joblib import Parallel, delayed
 from tqdm import tqdm
+from xgboost import XGBClassifier, XGBRegressor
 
 
 #%%
@@ -76,11 +77,13 @@ class ParallelModelTrainer:
         X_val_scaled = scaler.transform(X_val)
     
         # Fit modello
-        # model.fit(X_train_scaled, y_train)
-        model.fit(X_train_scaled, y_train, 
-                      eval_set=[(X_val_scaled, y_val)],
-                      verbose=False
-                      )
+        if isinstance(model, (XGBClassifier, XGBRegressor)):
+            model.fit(
+                X_train_scaled, y_train,
+                eval_set=[(X_val_scaled, y_val)]
+            )
+        else:
+            model.fit(X_train_scaled, y_train)
     
         # Predizioni
         y_pred = model.predict(X_val_scaled)
