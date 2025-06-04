@@ -15,6 +15,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import time
+from xgboost import XGBClassifier, XGBRegressor
 
 
 #%%
@@ -83,10 +84,15 @@ class ParallelGridSearch:
         for param_comb in self.param_grid:
             model = clone(self.model)
             model.set_params(**param_comb)
-            model.fit(X_train_scaled, y_train, 
-                      # eval_set=[(X_val_scaled, y_val)],
-                      # verbose=False
-                      )
+            # Fit modello
+            if isinstance(model, (XGBClassifier, XGBRegressor)):
+                model.fit(
+                    X_train_scaled, y_train,
+                    eval_set=[(X_val_scaled, y_val)],
+                    verbose=False
+                )
+            else:
+                model.fit(X_train_scaled, y_train)
 
             y_pred = model.predict(X_val_scaled)
 
