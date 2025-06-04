@@ -80,7 +80,8 @@ class ParallelModelTrainer:
         if isinstance(model, (XGBClassifier, XGBRegressor)):
             model.fit(
                 X_train_scaled, y_train,
-                eval_set=[(X_val_scaled, y_val)]
+                eval_set=[(X_val_scaled, y_val)],
+                verbose=False
             )
         else:
             model.fit(X_train_scaled, y_train)
