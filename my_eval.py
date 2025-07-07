@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import confusion_matrix, roc_curve, auc, roc_auc_score
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score
+from pathlib import Path
 
 
 #%%
@@ -107,81 +108,108 @@ class EvaluationMetrics:
             print(f"{metric}: Mediana = {median_value:.4f}, IQR = {iqr_value:.4f}")
 
         return df_metrics
+        
 
-    def plot_confusion_matrix(self, perc='row', classes=None, save=False):
-        """Genera la matrice di confusione per classificazione binaria e multiclasse."""
-        if self.task not in ["binaryclass", "multiclass"]:
+    def plot_confusion_matrix(
+        self,
+        perc: str = "row",
+        classes=None,
+        save_path: str | Path | None = None,
+    ):
+        """
+        Genera la matrice di confusione (mediana ± IQR) per classificazione binaria o multiclasse.
+    
+        Parameters
+        ----------
+        perc : {"row", "total"}, default "row"
+            Calcolo delle percentuali: "row" per riga, "total" sul totale.
+        classes : array-like, default None
+            Etichette da mostrare sugli assi. Se None, dedotte da `self.y_true`.
+        save_path : str | Path | None, default None
+            Directory per salvare la figura. Se None, la figura non viene salvata.
+        """
+        # Controllo task
+        if self.task not in {"binaryclass", "multiclass"}:
             raise ValueError("La matrice di confusione è disponibile solo per la classificazione.")
-        
-        def cm(df_pred):
-            # Estrarre le etichette reali
+    
+        def compute_cm_stats(df_pred):
+            """Calcola la mediana e l'IQR delle confusion matrix da più folds."""
             y_true = df_pred.iloc[:, 0]
-            
-            # Creare una lista per raccogliere le matrici di confusione per ogni colonna di predizione
-            confusion_matrices = []
-            
-            for col in df_pred.columns[1:]:
-                y_pred = df_pred[col]
-                cm = confusion_matrix(y_true, y_pred)
-                confusion_matrices.append(cm)
-            
-            # Convertire la lista in un array numpy
-            confusion_matrices = np.array(confusion_matrices)
-            
-            # Calcolare la mediana e l'IQR lungo la prima dimensione (ripetizioni CV)
-            cm_median = np.median(confusion_matrices, axis=0)
-            cm_q1 = np.percentile(confusion_matrices, 25, axis=0)
-            cm_q3 = np.percentile(confusion_matrices, 75, axis=0)
-            cm_iqr = cm_q3 - cm_q1
-            
-            return cm_median, cm_iqr
-        
-        def plot_cm(cm_median, cm_iqr, perc='row', classes=None):
-            
-            if classes is None:
-                # Determinare il numero di classi
-                classes = np.unique(self.y_true)
-               
+            matrices = [
+                confusion_matrix(y_true, df_pred[col])
+                for col in df_pred.columns[1:]
+            ]
+            matrices = np.array(matrices)  # shape: (n_folds, n_classes, n_classes)
+            median_cm = np.median(matrices, axis=0)
+            iqr_cm = np.percentile(matrices, 75, axis=0) - np.percentile(matrices, 25, axis=0)
+            return median_cm, iqr_cm
+    
+        def prepare_annotations(median_cm, iqr_cm, perc):
+            """Prepara le stringhe di annotazione da mostrare sulla heatmap."""
             if perc == "row":
-                cm_median_perc = cm_median / cm_median.sum(axis=1, keepdims=True) * 100  # Percentuale per riga
-                cm_iqr_perc = cm_iqr / cm_median.sum(axis=1, keepdims=True) * 100  # Percentuale per riga
+                denom = median_cm.sum(axis=1, keepdims=True)
             elif perc == "total":
-                cm_total = cm_median.sum()
-                cm_median_perc = cm_median / cm_total * 100  # Percentuale totale
-                cm_iqr_perc = cm_iqr / cm_total * 100
+                denom = median_cm.sum()
             else:
-                raise ValueError("La percentuale può essere calcolata o sul numero di elementi sulla riga (row) o sul numero di elementi totale (total).")
-            
-            # Creare la matrice con mediana ± IQR e percentuale
-            cm_display = np.char.array(cm_median.astype(str))
-            for i in range(cm_median.shape[0]):
-                for j in range(cm_median.shape[1]):
-                    cm_display[i, j] += f' ± {cm_iqr[i, j]:.2f}\n{cm_median_perc[i, j]:.2f} ± {cm_iqr_perc[i, j]:.2f} %'
-            
-            # Plot della matrice con mediana ± IQR e percentuale
+                raise ValueError("perc dev'essere 'row' o 'total'.")
+    
+            median_perc = median_cm / denom * 100
+            iqr_perc = iqr_cm / denom * 100
+    
+            annot = []
+            for i in range(median_cm.shape[0]):
+                row = []
+                for j in range(median_cm.shape[1]):
+                    text = (
+                        f"{int(median_cm[i,j])} ± {iqr_cm[i,j]:.2f}\n"
+                        f"{median_perc[i,j]:.2f} ± {iqr_perc[i,j]:.2f} %"
+                    )
+                    row.append(text)
+                annot.append(row)
+            return annot
+    
+        def plot_heatmap(median_cm, annotations, classes, save_dir):
+            """Crea e mostra la heatmap della matrice di confusione con annotazioni."""
+            if classes is None:
+                classes_ = np.unique(self.y_true)
+            else:
+                classes_ = classes
+    
             plt.figure(figsize=(8, 6))
-            sns.heatmap(cm_median, annot=cm_display, fmt='', cmap='YlGnBu',
-                        xticklabels=classes, yticklabels=classes, annot_kws={'size': 14})
-            plt.xlabel('Predicted', fontsize=14)
-            plt.ylabel('Actual', fontsize=14)
-            plt.title('Confusion Matrix (Median ± IQR)', fontsize=16)
-            
-            # Salvataggio
-            if save:
-                filename = input("Inserisci il nome del file per salvare la figura (es: 'conf_matrix.png'): ")
-                plt.savefig(f"03_Images/CM_{filename}", bbox_inches='tight')
-                print(f"Immagine salvata come {filename}")
-            
+            sns.heatmap(
+                median_cm,
+                annot=annotations,
+                fmt="",
+                cmap="YlGnBu",
+                xticklabels=classes_,
+                yticklabels=classes_,
+                annot_kws={"size": 14}
+            )
+            plt.xlabel("Predicted", fontsize=14)
+            plt.ylabel("Actual", fontsize=14)
+            plt.title("Confusion Matrix (Median ± IQR)", fontsize=16)
+    
+            if save_dir is not None:
+                save_dir = Path(save_dir)
+                save_dir.mkdir(parents=True, exist_ok=True)
+                file_path = save_dir / "CM.png"
+                plt.savefig(file_path, bbox_inches="tight")
+                print(f"Figura salvata in: {file_path}")
+    
             plt.show()
             plt.close()
+    
+        # Calcolo mediana e IQR
+        median_cm, iqr_cm = compute_cm_stats(self.df_pred)
+    
+        # Preparo le annotazioni da visualizzare
+        annotations = prepare_annotations(median_cm, iqr_cm, perc)
+    
+        # Effettuo il plot
+        plot_heatmap(median_cm, annotations, classes, save_path)
 
-        # Calcolare la matrice di confusione
-        cm_median, cm_iqr = cm(self.df_pred)
-        
-        # Generare il plot
-        plot_cm(cm_median, cm_iqr, perc, classes)
-        
-    def plot_roc_curve(self, save=False):
+
+    def plot_roc_curve(self, save_path=None):
         """
         Plot delle curve ROC per ciascun set di predizioni probabilistiche
         contenute in self.df_pred_proba. Si assume che la prima colonna
@@ -225,63 +253,80 @@ class EvaluationMetrics:
         plt.tight_layout()
         
         # Salvataggio
-        if save:
-            filename = input("Inserisci il nome del file per salvare la figura (es: 'conf_matrix.png'): ")
-            plt.savefig(f"03_Images/ROC_{filename}", bbox_inches='tight')
-            print(f"Immagine salvata come {filename}")
+        if save_path is not None:
+            file_path = save_path / "loss.png"
+            plt.savefig(file_path)
+            print(f"Figura salvata in: {file_path}")
             
         plt.show()
         plt.close()
 
-    def plot_metrics_boxplot(self, df_metrics, save=False):
+
+    def plot_metrics_boxplot(self, df_metrics: pd.DataFrame, save_path: str | Path | None = None):
         """
-        Plot separati (in griglia 2x2) per ogni metrica di regressione.
-        Per classificazione, mantiene il boxplot unico.
+        Boxplot dei parametri di valutazione.
+        - Regressione: quattro boxplot in griglia 2×2.
+        - Classificazione: boxplot unico con tutte le metriche.
+    
+        Parameters
+        ----------
+        df_metrics : pandas.DataFrame
+            DataFrame con le metriche (colonne). La prima colonna dev’essere la
+            metrica target per regressione; per classificazione ogni colonna è
+            una metrica diversa.
+        save_path : str | Path | None, default None
+            Directory dove salvare la figura. Se None, la figura non viene salvata.
         """
         if df_metrics is None or df_metrics.empty:
             raise ValueError("Il DataFrame df_metrics non può essere vuoto.")
     
+        # ───────────────────────────────────────────────────────── Regressione ──
         if self.task == "regression":
-            metrics = ['MAE', 'MAPE', 'RMSE', 'R2']
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-            
+            metrics = ["MAE", "MAPE", "RMSE", "R2"]
+            colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+    
             fig, axes = plt.subplots(2, 2, figsize=(12, 10))
             axes = axes.flatten()
-            
-            for i, metric in enumerate(metrics):
-                sns.boxplot(y=df_metrics[metric], ax=axes[i], color=colors[i],
-                            showfliers=True, width=0.3)
-                axes[i].set_title(metric, fontsize=16)
-                axes[i].set_ylabel('Values', fontsize=12)
     
-            plt.suptitle('Metrics Boxplots', fontsize=20)
+            for i, metric in enumerate(metrics):
+                sns.boxplot(
+                    y=df_metrics[metric],
+                    ax=axes[i],
+                    color=colors[i],
+                    showfliers=True,
+                    width=0.3,
+                )
+                axes[i].set_title(metric, fontsize=16)
+                axes[i].set_ylabel("Values", fontsize=12)
+    
+            plt.suptitle("Metrics Boxplots", fontsize=20)
             plt.tight_layout(rect=[0, 0.03, 1, 1])
     
-            # Salvataggio
-            if save:
-                filename = input("Inserisci il nome del file per salvare la figura (es: 'boxplot_metrics.png'): ")
-                plt.savefig(f"03_Images/BP_{filename}", bbox_inches='tight')
-                print(f"Immagine salvata come {filename}")
-    
-            plt.show()
-            plt.close()
-    
+        # ───────────────────────────────────────────────────── Classificazione ──
         else:
-            # Per classificazione: boxplot unico
-            df_melted = df_metrics.melt(var_name='Metric', value_name='Value')
-            plt.figure(figsize=(10, 6))
-            sns.boxplot(x='Metric', y='Value', data=df_melted,
-                        hue='Metric', palette='Set2', legend=False)
-            plt.xlabel('Metrics', fontsize=14)
-            plt.ylabel('Values', fontsize=14)
-            plt.title('Metrics Boxplot', fontsize=16)
-            plt.xticks(rotation=45, fontsize=12)
+            df_melted = df_metrics.melt(var_name="Metric", value_name="Value")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.boxplot(
+                x="Metric",
+                y="Value",
+                data=df_melted,
+                hue="Metric",
+                palette="Set2",
+                legend=False,
+                ax=ax,
+            )
+            ax.set_xlabel("Metrics", fontsize=14)
+            ax.set_ylabel("Values", fontsize=14)
+            ax.set_title("Metrics Boxplot", fontsize=16)
+            ax.tick_params(axis="x", rotation=45, labelsize=12)
             plt.tight_layout()
     
-            if save:
-                filename = input("Inserisci il nome del file per salvare la figura (es: 'boxplot_metrics.png'): ")
-                plt.savefig(f"03_Images/BP_{filename}", bbox_inches='tight')
-                print(f"Immagine salvata come {filename}")
+        # ───────────────────────────────────────────────────────── Salvataggio ──
+        if save_path is not None:
+            save_dir = Path(save_path)
+            file_path = save_dir / "metrics_boxplot.png"
+            plt.savefig(file_path, bbox_inches="tight")
+            print(f"Figura salvata in: {file_path}")
     
-            plt.show()
-            plt.close()
+        plt.show()
+        plt.close()
