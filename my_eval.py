@@ -106,6 +106,9 @@ class EvaluationMetrics:
             median_value = np.median(values)
             iqr_value = np.percentile(values, 75) - np.percentile(values, 25)
             print(f"{metric}: Mediana = {median_value:.4f}, IQR = {iqr_value:.4f}")
+            mean_value = np.mean(values)
+            std_value  = np.std(values)   # ddof=1 per la deviazione standard campionaria
+            print(f"{metric}: Media = {mean_value:.4f}, Std = {std_value:.4f}")
 
         return df_metrics
         
@@ -113,11 +116,12 @@ class EvaluationMetrics:
     def plot_confusion_matrix(
         self,
         perc: str = "row",
+        stat_method: str = "median_iqr",  # nuovo parametro: "median_iqr" o "mean_std"
         classes=None,
         save_path: str | Path | None = None,
     ):
         """
-        Genera la matrice di confusione (mediana ± IQR) per classificazione binaria o multiclasse.
+        Genera la matrice di confusione con statistiche di dispersione.
     
         Parameters
         ----------
@@ -127,49 +131,57 @@ class EvaluationMetrics:
             Etichette da mostrare sugli assi. Se None, dedotte da `self.y_true`.
         save_path : str | Path | None, default None
             Directory per salvare la figura. Se None, la figura non viene salvata.
+        stat_method : {"median_iqr", "mean_std"}, default "median_iqr"
+            Metodo per le statistiche della confusion matrix:
+            - "median_iqr": mediana ± IQR (robusto)
+            - "mean_std": media ± deviazione standard (classico)
         """
-        # Controllo task
         if self.task not in {"binaryclass", "multiclass"}:
             raise ValueError("La matrice di confusione è disponibile solo per la classificazione.")
     
         def compute_cm_stats(df_pred):
-            """Calcola la mediana e l'IQR delle confusion matrix da più folds."""
             y_true = df_pred.iloc[:, 0]
             matrices = [
                 confusion_matrix(y_true, df_pred[col])
                 for col in df_pred.columns[1:]
             ]
-            matrices = np.array(matrices)  # shape: (n_folds, n_classes, n_classes)
-            median_cm = np.median(matrices, axis=0)
-            iqr_cm = np.percentile(matrices, 75, axis=0) - np.percentile(matrices, 25, axis=0)
-            return median_cm, iqr_cm
+            matrices = np.array(matrices)  # (n_folds, n_classes, n_classes)
     
-        def prepare_annotations(median_cm, iqr_cm, perc):
-            """Prepara le stringhe di annotazione da mostrare sulla heatmap."""
+            if stat_method == "median_iqr":
+                median_cm = np.median(matrices, axis=0)
+                iqr_cm = np.percentile(matrices, 75, axis=0) - np.percentile(matrices, 25, axis=0)
+                return median_cm, iqr_cm
+            elif stat_method == "mean_std":
+                mean_cm = matrices.mean(axis=0)
+                std_cm = matrices.std(axis=0, ddof=1)  # deviazione standard campionaria
+                return mean_cm, std_cm
+            else:
+                raise ValueError("stat_method deve essere 'median_iqr' o 'mean_std'")
+    
+        def prepare_annotations(stat_cm, error_cm, perc):
             if perc == "row":
-                denom = median_cm.sum(axis=1, keepdims=True)
+                denom = stat_cm.sum(axis=1, keepdims=True)
             elif perc == "total":
-                denom = median_cm.sum()
+                denom = stat_cm.sum()
             else:
                 raise ValueError("perc dev'essere 'row' o 'total'.")
     
-            median_perc = median_cm / denom * 100
-            iqr_perc = iqr_cm / denom * 100
+            stat_perc = stat_cm / denom * 100
+            error_perc = error_cm / denom * 100
     
             annot = []
-            for i in range(median_cm.shape[0]):
+            for i in range(stat_cm.shape[0]):
                 row = []
-                for j in range(median_cm.shape[1]):
+                for j in range(stat_cm.shape[1]):
                     text = (
-                        f"{int(median_cm[i,j])} ± {iqr_cm[i,j]:.2f}\n"
-                        f"{median_perc[i,j]:.2f} ± {iqr_perc[i,j]:.2f} %"
+                        f"{stat_cm[i,j]:.2f} ± {error_cm[i,j]:.2f}\n"
+                        f"{stat_perc[i,j]:.2f} ± {error_perc[i,j]:.2f} %"
                     )
                     row.append(text)
                 annot.append(row)
             return annot
     
-        def plot_heatmap(median_cm, annotations, classes, save_dir):
-            """Crea e mostra la heatmap della matrice di confusione con annotazioni."""
+        def plot_heatmap(stat_cm, annotations, classes, save_dir):
             if classes is None:
                 classes_ = np.unique(self.y_true)
             else:
@@ -177,7 +189,7 @@ class EvaluationMetrics:
     
             plt.figure(figsize=(8, 6))
             sns.heatmap(
-                median_cm,
+                stat_cm,
                 annot=annotations,
                 fmt="",
                 cmap="YlGnBu",
@@ -187,7 +199,8 @@ class EvaluationMetrics:
             )
             plt.xlabel("Predicted", fontsize=14)
             plt.ylabel("Actual", fontsize=14)
-            plt.title("Confusion Matrix (Median ± IQR)", fontsize=16)
+            title_stat = "Median ± IQR" if stat_method == "median_iqr" else "Mean ± Std"
+            plt.title(f"Confusion Matrix ({title_stat})", fontsize=16)
     
             if save_dir is not None:
                 save_dir = Path(save_dir)
@@ -199,65 +212,83 @@ class EvaluationMetrics:
             plt.show()
             plt.close()
     
-        # Calcolo mediana e IQR
-        median_cm, iqr_cm = compute_cm_stats(self.df_pred)
-    
-        # Preparo le annotazioni da visualizzare
-        annotations = prepare_annotations(median_cm, iqr_cm, perc)
-    
-        # Effettuo il plot
-        plot_heatmap(median_cm, annotations, classes, save_path)
+        stat_cm, error_cm = compute_cm_stats(self.df_pred)
+        annotations = prepare_annotations(stat_cm, error_cm, perc)
+        plot_heatmap(stat_cm, annotations, classes, save_path)
 
 
-    def plot_roc_curve(self, save_path=None):
+    def plot_roc_curve(self,
+                       stat_method: str = "median_iqr",  # "median_iqr" o "mean_std"
+                       save_path=None):
         """
         Plot delle curve ROC per ciascun set di predizioni probabilistiche
         contenute in self.df_pred_proba. Si assume che la prima colonna
         sia 'true_labels' e le successive siano le predizioni.
+        
+        Parameters
+        ----------
+        stat_method : {"median_iqr", "mean_std"}, default "median_iqr"
+            Metodo per calcolare la statistica AUC e l'errore:
+            - "median_iqr": mediana ± interquartile range (IQR)
+            - "mean_std": media ± deviazione standard
+        save_path : str | Path | None, default None
+            Percorso per salvare la figura. Se None la figura non viene salvata.
         """
+    
         if not hasattr(self, "df_pred_proba") or self.df_pred_proba is None:
             raise AttributeError("df_pred_proba non è stato trovato o è None.")
-
+    
         if not hasattr(self, "task") or self.task != "binaryclass":
             raise ValueError("Il metodo plot_roc_curve è disponibile solo per problemi di classificazione binaria.")
-
+    
         plt.figure(figsize=(8, 6))
     
         # Plot curva random
         plt.plot([0, 1], [0, 1], 'k--', label='Random Model')
-        
+    
         auc_list = []
-        
+    
         # ROC curves rosse senza label
         for col in self.df_pred_proba.columns[1:]:
             y_scores = self.df_pred_proba[col]
             fpr, tpr, _ = roc_curve(self.y_true, y_scores)
             roc_auc = auc(fpr, tpr)
             plt.plot(fpr, tpr, color='red', alpha=0.4)
-        
             auc_list.append(roc_auc)
-        
-        # Calcola statistica AUC
-        auc_median = np.median(auc_list)
-        auc_iqr = np.percentile(auc_list, 75) - np.percentile(auc_list, 25)
-        
+    
+        auc_list = np.array(auc_list)
+    
+        if stat_method == "median_iqr":
+            auc_stat = np.median(auc_list)
+            auc_err = np.percentile(auc_list, 75) - np.percentile(auc_list, 25)
+            label = f"Median AUC = {auc_stat:.2f} ± {auc_err:.2f} (IQR)"
+        elif stat_method == "mean_std":
+            auc_stat = auc_list.mean()
+            auc_err = auc_list.std(ddof=1)
+            label = f"Mean AUC = {auc_stat:.2f} ± {auc_err:.2f} (Std)"
+        else:
+            raise ValueError("stat_method deve essere 'median_iqr' o 'mean_std'.")
+    
         # Linee fittizie per la legenda
         plt.plot([], [], color='red', label='ROC')
-        plt.plot([], [], color='white', label=f'Median AUC = {auc_median:.2f} ± {auc_iqr:.2f}')        
-        
+        plt.plot([], [], color='white', label=label)
+    
         plt.xlabel('False Positive Rate', fontsize=14)
         plt.ylabel('True Positive Rate', fontsize=14)
         plt.title('ROC Curve', fontsize=16)
         plt.legend(fontsize=12)
         plt.grid(True)
         plt.tight_layout()
-        
+    
         # Salvataggio
         if save_path is not None:
-            file_path = save_path / "loss.png"
+            from pathlib import Path
+            save_path = Path(save_path)
+            save_path.mkdir(parents=True, exist_ok=True)
+            file_path = save_path / "roc.png"
             plt.savefig(file_path)
             print(f"Figura salvata in: {file_path}")
-            
+    
         plt.show()
         plt.close()
 
