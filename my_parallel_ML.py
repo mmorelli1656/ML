@@ -52,27 +52,26 @@ class ParallelModelTrainer:
         X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
         y_train, y_val = self.y[train_idx], self.y[val_idx]
         
-        # Bilanciamento del dataset
-        if self.balancer is not None:
-            balancer = clone(self.balancer)
-            X_train, y_train = balancer.fit_resample(X_train, y_train)
-            # Se X_train è ora un ndarray, converti in DataFrame per compatibilità
-            if not isinstance(X_train, pd.DataFrame):
-                X_train = pd.DataFrame(X_train, columns=self.X.columns)
-    
-        # Applica i selettori di feature se forniti
+        # 1) Feature selection sul train originale
         for selector in self.feature_selectors:
             selector.set_output(transform='pandas')
             X_train = selector.fit_transform(X_train, y_train)
             X_val = selector.transform(X_val)
-    
+        
         selected_features = X_train.columns
-    
-        # Clona scaler e modello
+        
+        # 2) Oversampling su train con feature selezionate
+        if self.balancer is not None:
+            balancer = clone(self.balancer)
+            X_train, y_train = balancer.fit_resample(X_train, y_train)
+            # converti se necessario
+            if not isinstance(X_train, pd.DataFrame):
+                X_train = pd.DataFrame(X_train, columns=selected_features)
+        
+        # 3) Scaling
         scaler = clone(self.scaler)
         model = clone(self.model)
-    
-        # Standardizzazione
+        
         X_train_scaled = scaler.fit_transform(X_train, y_train)
         X_val_scaled = scaler.transform(X_val)
     
