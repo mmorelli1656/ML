@@ -65,6 +65,8 @@ for file_path in spectrum_files:
     spectra_dict[spectrum_name] = df
 
 
+del df, spectrum_name, file_path, spectrum_files
+
 
 #%% Interpolazione
 
