@@ -7,19 +7,349 @@ Created on Mon Sep  8 09:22:42 2025
 
 #%% Libraries and submodules
 
-import sys
-import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy.interpolate import PchipInterpolator
-from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter, find_peaks
 from sklearn.mixture import GaussianMixture
     
 # Submodules utilities
 from Utils.project_paths import ProjectPaths
+
+
+#%% Functions
+
+# ==============================================================
+# 1) Preprocessing of spectra: interpolation, smoothing, normalization, peak detection
+# ==============================================================
+def preprocess_spectra(spectra_dict, min_wn=200, max_wn=2000, step=1,
+                       sg_window=91, sg_order=3, peak_threshold=0.0001,
+                       show_plots=False):
+    """
+    Preprocess all spectra by:
+      - Interpolating intensity values onto a common wavenumber grid using monotone spline (PCHIP).
+      - Applying Savitzky-Golay smoothing.
+      - Normalizing each spectrum so that total area under curve = 1.
+      - Detecting peaks above a given prominence threshold.
+
+    Parameters
+    ----------
+    spectra_dict : dict
+        Dictionary with {patient: {"Wave": array, "Intensity": array}}
+    min_wn, max_wn, step : int
+        Common grid definition (wavenumber range and spacing).
+    sg_window, sg_order : int
+        Savitzky-Golay filter parameters.
+    peak_threshold : float
+        Minimum prominence for peak detection.
+    show_plot : bool
+        If True, show diagnostic plots for each spectrum.
+
+    Returns
+    -------
+    all_normalized_spectra : DataFrame
+        Each row = normalized spectrum for one patient.
+    all_peaks : dict
+        {patient: {"Positions": array, "Heights": array}} with detected peaks.
+    common_grid : ndarray
+        The common wavenumber grid.
+    """
+
+    common_grid = np.arange(min_wn, max_wn + 1, step)
+    all_normalized_spectra = pd.DataFrame()
+    all_peaks = {}
+
+    for patient, data in spectra_dict.items():
+        wn = data['Wave'].values
+        intensity = data['Intensity'].values
+
+        # Use mask to restrict interpolation only to the range of original data
+        mask = (common_grid >= wn.min()) & (common_grid <= wn.max())
+        grid_interp = common_grid[mask]
+
+        # PCHIP ensures monotone and shape-preserving interpolation (avoids oscillations)
+        pchip = PchipInterpolator(wn, intensity)
+        intensity_interp = pchip(grid_interp)
+
+        # Savitzky-Golay smoothing: polynomial filter to reduce noise
+        smoothed = savgol_filter(intensity_interp, window_length=sg_window, polyorder=sg_order)
+
+        # Force negative values (from noise or filter) to zero
+        smoothed[smoothed < 0] = 0
+
+        # Normalize so total area under the curve = 1
+        intensity_norm = smoothed / smoothed.sum()
+
+        # Fill into full grid (outside range → zeros)
+        full_spectrum = np.zeros_like(common_grid, dtype=float)
+        full_spectrum[mask] = intensity_norm
+
+        # Store normalized spectrum
+        full_spectrum_df = pd.Series(full_spectrum).to_frame().T
+        full_spectrum_df.index = [patient]
+        all_normalized_spectra = pd.concat([all_normalized_spectra, full_spectrum_df])
+
+        # Detect peaks by prominence threshold
+        peaks, _ = find_peaks(full_spectrum, prominence=peak_threshold)
+        peaks_positions = common_grid[peaks]
+        peaks_heights = full_spectrum[peaks]
+
+        all_peaks[patient] = {"Positions": peaks_positions, "Heights": peaks_heights}
+
+        if show_plots:
+            fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+
+            axs[0, 0].plot(wn, intensity, color='blue')
+            axs[0, 0].set_title('Original')
+
+            axs[0, 1].plot(grid_interp, intensity_interp, color='red')
+            axs[0, 1].set_title('Interpolated')
+
+            axs[1, 0].plot(grid_interp, smoothed, color='green')
+            axs[1, 0].set_title('Smoothed')
+
+            axs[1, 1].plot(common_grid, full_spectrum, color='brown')
+            axs[1, 1].plot(peaks_positions, peaks_heights, 'ro')
+            axs[1, 1].set_title('Normalized + Peaks')
+
+            for ax in axs.flat:
+                ax.set_xlabel("Wavenumber (cm$^{-1}$)")
+
+            plt.suptitle(patient)
+            plt.tight_layout()
+            plt.show()
+
+    return all_normalized_spectra, all_peaks, common_grid
+
+
+# ==============================================================
+# 2) Fit Gaussian Mixture Model to all peak positions
+# ==============================================================
+def fit_gmm(all_peaks, max_components=19, show_plots=False):
+    """
+    Fit univariate Gaussian Mixture Models (GMM) on concatenated peak positions
+    to identify common peaks across spectra.
+
+    - Uses BIC (Bayesian Information Criterion) to select the optimal number of components.
+    - Returns Gaussian means, standard deviations, weights, and intervals [mu-sigma, mu+sigma].
+
+    Parameters
+    ----------
+    all_peaks : dict
+        {patient: {"Positions": array}}
+    max_components : int
+        Maximum number of mixture components to test.
+    show_plots : bool
+        If True, plot GMM fits for each number of components.
+
+    Returns
+    -------
+    common_peaks : DataFrame
+        Components with mean, std, weight, and interval boundaries.
+    """
+
+    # Flatten all peak positions into one long DataFrame
+    all_peaks_positions = pd.DataFrame()
+    for patient, patient_peaks in all_peaks.items():
+        peaks_positions = pd.DataFrame(patient_peaks['Positions'], columns=['Peaks'])
+        peaks_positions.index = [f"{patient}_peak_{i}" for i in range(1, len(peaks_positions) + 1)]
+        all_peaks_positions = pd.concat([all_peaks_positions, peaks_positions])
+
+    # Try multiple GMM fits and evaluate with BIC
+    bic_scores = {}
+    gm_models = {}
+
+    for n in range(2, max_components + 1):
+        gm = GaussianMixture(n_components=n, covariance_type='full', random_state=n)
+        gm.fit(all_peaks_positions.values)
+
+        bic = gm.bic(all_peaks_positions.values)
+        bic_scores[n] = bic
+        gm_models[n] = gm
+
+        if show_plots:
+            x = np.linspace(all_peaks_positions.min() - 10, all_peaks_positions.max() + 10, 1000).reshape(-1, 1)
+            logprob = gm.score_samples(x)
+            pdf = np.exp(logprob)
+
+            plt.hist(all_peaks_positions, bins=100, density=True, alpha=0.5, color='gray')
+            plt.plot(x, pdf, color='red', lw=2)
+            plt.xlabel('Raman shift (cm^-1)')
+            plt.ylabel('Density')
+            plt.title(f'GMM with {n} components, BIC = {bic:.2f}')
+            plt.show()
+
+    # Select model with lowest BIC
+    best_n = min(bic_scores, key=bic_scores.get)
+    best_gm = gm_models[best_n]
+    print(f"The best model has {best_n} components")
+
+    # Extract GMM parameters
+    means = best_gm.means_.flatten()
+    stds = np.sqrt(best_gm.covariances_.flatten())
+    weights = best_gm.weights_.flatten()
+
+    # Define intervals as [mu - sigma, mu + sigma]
+    intervals = np.column_stack([means - stds, means + stds])
+
+    common_peaks = pd.DataFrame({
+        'Means': means,
+        'Stds': stds,
+        'Weights': weights,
+        'Min_Int': intervals[:, 0],
+        'Max_Int': intervals[:, 1]
+    }, index=[f"component_{i}" for i in range(1, best_n + 1)])
+
+    # Sort components by mean position
+    common_peaks = common_peaks.sort_values(by='Means')
+
+    return common_peaks
+
+
+# ==============================================================
+# 3) Compute prominence of each interval in each spectrum
+# ==============================================================
+def compute_prominences(all_normalized_spectra, common_peaks, common_grid):
+    """
+    For each patient spectrum, compute the maximum intensity (prominence)
+    within each interval defined by GMM components.
+
+    Parameters
+    ----------
+    all_normalized_spectra : DataFrame
+        Normalized spectra with common grid.
+    common_peaks : DataFrame
+        GMM components with intervals.
+    common_grid : ndarray
+        Common wavenumber grid.
+
+    Returns
+    -------
+    prominences : DataFrame
+        Each row = patient, each column = P1...Pn interval maxima.
+    """
+
+    common_grid = pd.Series(common_grid, name='Wavenumbers')
+    prominences = pd.DataFrame()
+
+    for patient in all_normalized_spectra.index:
+        spectrum = all_normalized_spectra.loc[patient].to_frame(name=patient)
+        spectrum['Wavenumbers'] = common_grid
+
+        prominences_patient = []
+        for component in common_peaks.index:
+            min_int = common_peaks.loc[component, 'Min_Int']
+            max_int = common_peaks.loc[component, 'Max_Int']
+
+            # Select portion of spectrum in this interval
+            spectrum_chunk = spectrum[(spectrum['Wavenumbers'] >= min_int) & (spectrum['Wavenumbers'] < max_int)]
+            prominence_int = spectrum_chunk[patient].max()
+            prominences_patient.append(prominence_int)
+
+        # Store as one row
+        prominences_patient = pd.DataFrame([prominences_patient], index=[patient],
+                                           columns=[f"P{i}" for i in range(1, common_peaks.shape[0] + 1)])
+        prominences = pd.concat([prominences, prominences_patient])
+
+    return prominences
+
+
+# ==============================================================
+# 4) Build feature matrix and labels
+# ==============================================================
+def create_labels_and_dataset(prominences):
+    """
+    Create raw ratio dataset and binary labels from prominence data.
+
+    Labels:
+        - If patient name contains '+Ag' → 1
+        - Else → 0
+
+    Parameters
+    ----------
+    prominences : DataFrame
+        Interval prominences per patient.
+
+    Returns
+    -------
+    data : DataFrame
+        Raw ratio dataset (all Pi/Pj and Pj/Pi, no NaN if possible).
+    labels : Series
+        Binary labels.
+    """
+    labels = pd.Series(
+        [1 if "+Ag" in patient else 0 for patient in prominences.index],
+        name="Truth",
+        index=prominences.index
+    )
+
+    ratio_dicts = []
+    for patient in prominences.index:
+        ratios_patient = {}
+        for i in range(1, prominences.shape[1] + 1):
+            val_i = prominences.loc[patient, f"P{i}"]
+            for j in range(1, prominences.shape[1] + 1):
+                if i == j:
+                    continue
+                val_j = prominences.loc[patient, f"P{j}"]
+
+                # Both directions, avoid division by zero
+                ratios_patient[f"P{i}/P{j}"] = val_i / val_j if val_j != 0 else np.nan
+                ratios_patient[f"P{j}/P{i}"] = val_j / val_i if val_i != 0 else np.nan
+
+        ratio_dicts.append(ratios_patient)
+
+    data = pd.DataFrame(ratio_dicts, index=prominences.index)
+    # # Fill NaN with median to fully match original behavior
+    # data = data.fillna(data.median())
+
+    return data, labels
+
+
+# ==============================================================
+# 5) Select best ratios and fill NaN only at the end
+# ==============================================================
+def select_ratios(data):
+    """
+    Select the ratio with higher relative variability (std/mean) from each pair of inverse ratios (Pi/Pj vs Pj/Pi).
+    NaN values are filled with median only after selection.
+
+    Parameters
+    ----------
+    data : DataFrame
+        Raw ratio dataset (all Pi/Pj and Pj/Pi, NaN possible).
+
+    Returns
+    -------
+    data_selected : DataFrame
+        Dataset with only the ratios with higher relative variability, NaN filled.
+    """
+    pairs, visited = [], set()
+    for f in data.columns:
+        if f not in visited:
+            num, den = f.split("/")
+            inverse = f"{den}/{num}"
+            if inverse in data.columns:
+                pairs.append((f, inverse))
+                visited.update([f, inverse])
+
+    # Keep the ratio with higher relative variability (std/mean)
+    to_keep = []
+    for ratio1, ratio2 in pairs:
+        r1, r2 = data[ratio1], data[ratio2]
+        score1 = r1.std(skipna=True) / r1.mean(skipna=True)
+        score2 = r2.std(skipna=True) / r2.mean(skipna=True)
+        if score1 >= score2:
+            to_keep.append(ratio1)
+        else:
+            to_keep.append(ratio2)
+
+    # Keep only selected ratios and fill missing values with median
+    data_selected = data[to_keep].copy()
+    data_selected = data_selected.fillna(data_selected.median())
+    return data_selected
 
 
 #%% Load files
@@ -42,6 +372,8 @@ spectra_dict = {}
 for file_path in spectrum_files:
     # File name without extension
     spectrum_name = file_path.stem
+    # Remove "_sub" at the end of the patient spectrum name
+    spectrum_name = spectrum_name.removesuffix("_sub")
     print("Loading spectrum:", spectrum_name)
 
     # Load the file
@@ -65,381 +397,31 @@ for file_path in spectrum_files:
 del df, spectrum_name, file_path, spectrum_files, pretreated_folder
 
 
-#%%
+#%% Analysis pipeline
 
-def preprocess_spectrum(wn, intensity, common_grid, window_length=91, polyorder=3):
-    """
-    Interpolate, smooth, clip, and normalize a spectrum.
+# Ask to show plots
+show_plots = input("Do you want to show plots? [y/N]: ").strip().lower() == "y"
 
-    Parameters
-    ----------
-    wn : ndarray
-        Original wavenumbers.
-    intensity : ndarray
-        Original intensity values.
-    common_grid : ndarray
-        Target wavenumber grid for interpolation.
-    window_length : int, optional
-        Window length for Savitzky-Golay smoothing. Must be odd.
-    polyorder : int, optional
-        Polynomial order for Savitzky-Golay smoothing.
+# 1) Preprocess spectra
+all_normalized_spectra, all_peaks, common_grid = preprocess_spectra(spectra_dict, show_plots=show_plots)
 
-    Returns
-    -------
-    full_spectrum : ndarray
-        Spectrum interpolated, smoothed, clipped, normalized, and mapped onto
-        the full common grid.
-    grid_interp : ndarray
-        Subset of the grid where interpolation was performed (within data range).
-    smoothed : ndarray
-        Smoothed intensity values on the interpolated grid.
-    """
-    # Limit interpolation to the range of original data
-    mask = (common_grid >= wn.min()) & (common_grid <= wn.max())
-    grid_interp = common_grid[mask]
+# 2) Fit Gaussian Mixture Model (GMM) on detected peaks
+common_peaks = fit_gmm(all_peaks, show_plots=show_plots)
 
-    # Monotone spline interpolation (PCHIP)
-    pchip = PchipInterpolator(wn, intensity)
-    intensity_interp = pchip(grid_interp)
+# 3) Compute prominences (interval maxima) for each spectrum
+prominences = compute_prominences(all_normalized_spectra, common_peaks, common_grid)
 
-    # Savitzky-Golay smoothing
-    smoothed = savgol_filter(intensity_interp, window_length=window_length, polyorder=polyorder)
+# 4) Build feature matrix and extract labels
+raw_data, labels = create_labels_and_dataset(prominences)
 
-    # Clip negative values
-    smoothed[smoothed < 0] = 0
-
-    # Normalize area under curve to 1
-    intensity_norm = smoothed / smoothed.sum()
-
-    # Fill full spectrum across the entire grid (zeros outside original range)
-    full_spectrum = np.zeros_like(common_grid, dtype=float)
-    full_spectrum[mask] = intensity_norm
-
-    return full_spectrum, grid_interp, smoothed
+# 5) Select best ratios
+proc_data = select_ratios(raw_data)
 
 
-def detect_peaks(spectrum, grid, prominence=0.0001):
-    """
-    Detect peaks in a normalized spectrum.
+#%% Save dataframes
 
-    Parameters
-    ----------
-    spectrum : ndarray
-        Full normalized spectrum on the common grid.
-    grid : ndarray
-        Common wavenumber grid.
-    prominence : float, optional
-        Minimum prominence for peak detection.
+# Concatenate df with labels
+df_final = pd.concat([proc_data, labels], axis=1)
 
-    Returns
-    -------
-    peaks_positions : ndarray
-        Wavenumber positions of detected peaks.
-    peaks_heights : ndarray
-        Heights of detected peaks.
-    """
-    peaks, _ = find_peaks(spectrum, prominence=prominence)
-    peaks_positions = grid[peaks]
-    peaks_heights = spectrum[peaks]
-    return peaks_positions, peaks_heights
-
-
-def plot_spectrum(patient, wn, intensity, grid_interp, intensity_interp,
-                  smoothed, common_grid, full_spectrum,
-                  peaks_positions, peaks_heights):
-    """
-    Plot the preprocessing steps of a spectrum in four panels.
-
-    Parameters
-    ----------
-    patient : str
-        Patient identifier.
-    wn : ndarray
-        Original wavenumbers.
-    intensity : ndarray
-        Original intensity values.
-    grid_interp : ndarray
-        Interpolated grid.
-    intensity_interp : ndarray
-        Interpolated intensity values.
-    smoothed : ndarray
-        Smoothed intensity values.
-    common_grid : ndarray
-        Full common grid.
-    full_spectrum : ndarray
-        Final normalized spectrum on the common grid.
-    peaks_positions : ndarray
-        Detected peak positions.
-    peaks_heights : ndarray
-        Detected peak heights.
-    """
-    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-
-    axs[0, 0].plot(wn, intensity, color='blue')
-    axs[0, 0].set_title('Preprocessed')
-
-    axs[0, 1].plot(grid_interp, intensity_interp, color='red')
-    axs[0, 1].set_title('Interpolated')
-
-    axs[1, 0].plot(grid_interp, smoothed, color='green')
-    axs[1, 0].set_title('Smoothed')
-
-    axs[1, 1].plot(common_grid, full_spectrum, color='brown')
-    axs[1, 1].plot(peaks_positions, peaks_heights, 'ro')
-    axs[1, 1].set_title('Normalized + Peaks')
-
-    for ax in axs.flat:
-        ax.set_xlabel("Wavenumber (cm$^{-1}$)")
-
-    plt.suptitle(patient)
-    plt.tight_layout()
-    plt.show()
-    
-
-#%% Parameters
-
-# Define common wavenumber grid (all spectra will have same length)
-min_wn = 200
-max_wn = 2000
-step = 1
-common_grid = np.arange(min_wn, max_wn + 1, step)
-
-# Savitzky-Golay parameters
-window_length = 91
-polyorder = 3
-
-# Peak detection threshold
-peak_threshold = 0.0001
-
-# Store all normalized spectra
-all_normalized_spectra = pd.DataFrame()
-
-# Dictionary: key = patient, value = dict with 'Positions' and 'Heights'
-all_peaks = {}
-
-
-#%% Main loop: preprocess spectra and detect peaks
-
-spectra_results = {}  # store results per patient
-
-for patient, data in spectra_dict.items():
-    wn = data['Wave'].values
-    intensity = data['Intensity'].values
-
-    full_spectrum, grid_interp, smoothed = preprocess_spectrum(
-        wn, intensity, common_grid,
-        window_length=window_length, polyorder=polyorder
-    )
-
-    peaks_positions, peaks_heights = detect_peaks(full_spectrum, common_grid, prominence=peak_threshold)
-
-    spectra_results[patient] = {
-        "wn": wn,
-        "intensity": intensity,
-        "grid_interp": grid_interp,
-        "intensity_interp": PchipInterpolator(wn, intensity)(grid_interp),
-        "smoothed": smoothed,
-        "full_spectrum": full_spectrum,
-        "peaks_positions": peaks_positions,
-        "peaks_heights": peaks_heights
-    }
-
-    # Save normalized spectrum into DataFrame
-    full_spectrum_df = pd.Series(full_spectrum).to_frame().T
-    full_spectrum_df.index = [patient]
-    all_normalized_spectra = pd.concat([all_normalized_spectra, full_spectrum_df], axis=0)
-
-    # Store peaks
-    all_peaks[patient] = {"Positions": peaks_positions, "Heights": peaks_heights}
-
-
-#%% Plot all spectra (optional)
-
-for patient, results in spectra_results.items():
-    plot_spectrum(
-        patient,
-        results["wn"],
-        results["intensity"],
-        results["grid_interp"],
-        results["intensity_interp"],
-        results["smoothed"],
-        common_grid,
-        results["full_spectrum"],
-        results["peaks_positions"],
-        results["peaks_heights"]
-    )
-
-
-#%% 2) Interpolazione
-
-# Definizione griglia comune
-min_wn = 200
-max_wn = 2000
-step = 1
-common_grid = np.arange(min_wn, max_wn + 1, step)  # tutti gli spettri avranno 1801 punti
-
-# Parametri Savitzky-Golay
-wl = 91
-po = 3
-
-# Threshold per picchi
-peak_th = 0.0001
-
-# Spettri normalizzati
-all_normalized_spectra = pd.DataFrame()
-
-# Mostra i plot
-show_plot = False
-
-# Dizionario con chiave = paziente e valore = dizionario con chiavi 'Posizioni' e 'Altezze' dei picchi trovati.
-all_peaks = {}
-
-for patient, data in spectra_dict.items():
-    
-    # Wavenumbers e Intensità del soggetto
-    wn = data['Wave'].values
-    intensity = data['Intensity'].values
-    
-    # Interpolazione spline monotona (PCHIP) sulla griglia comune
-    # Limiti interpolazione ai dati originali per evitare overshoot agli estremi
-    mask = (common_grid >= wn.min()) & (common_grid <= wn.max())
-    grid_interp = common_grid[mask]
-    
-    pchip = PchipInterpolator(wn, intensity)
-    intensity_interp = pchip(grid_interp)
-    
-    # Smoothing Savitzky-Golay su griglia uniforme
-    smoothed = savgol_filter(intensity_interp, window_length=wl, polyorder=po)
-    
-    # Clip dei valori negativi
-    smoothed[smoothed < 0] = 0
-    
-    # Normalizzazione area sotto curva = 1
-    intensity_norm = smoothed / smoothed.sum()
-    
-    # Riempimento in array completo su tutta la griglia comune
-    # Punti fuori dal range dei dati originali vengono messi a zero
-    full_spectrum = np.zeros_like(common_grid, dtype=float)
-    full_spectrum[mask] = intensity_norm
-    
-    full_spectrum_df = pd.Series(full_spectrum).to_frame().T
-    full_spectrum_df.index = [patient]
-    
-    all_normalized_spectra = pd.concat([all_normalized_spectra, full_spectrum_df], axis = 0)
-    
-    # Rilevazione picchi
-    peaks, _ = find_peaks(full_spectrum, prominence = peak_th)
-    peaks_positions = common_grid[peaks]
-    peaks_heights = full_spectrum[peaks]
-    
-    peaks_dict = {'Positions': peaks_positions, 'Heights': peaks_heights}
-    
-    all_peaks[patient] = peaks_dict
-    
-    if show_plot:
-    
-        # Plots 4 panel
-        fig, axs = plt.subplots(2, 2, figsize=(12,8))
-        
-        axs[0,0].plot(wn, intensity, color='blue')
-        axs[0,0].set_title('Preprocessed')
-        
-        axs[0,1].plot(grid_interp, intensity_interp, color='red')
-        axs[0,1].set_title('Interpolated')
-        
-        axs[1,0].plot(grid_interp, smoothed, color='green')
-        axs[1,0].set_title('Smoothed')
-        
-        axs[1,1].plot(common_grid, full_spectrum, color='brown')
-        axs[1,1].plot(peaks_positions, peaks_heights, 'ro')  # evidenzia picchi
-        axs[1,1].set_title('Normalized + Peaks')
-        
-        for ax in axs.flat:
-            ax.set_xlabel("Wavenumber (cm$^{-1}$)")
-        
-        plt.suptitle(patient)
-        plt.tight_layout()
-        plt.show()
-        
-        del ax, axs, fig
-    
-#     del data, full_spectrum, full_spectrum_df, grid_interp, wn, intensity, intensity_interp, intensity_norm, smoothed, mask, patient
-#     del peaks, peaks_dict, peaks_heights, peaks_positions
-
-# del min_wn, max_wn, step, wl, po, peak_th
-# del show_plot
-# del spectra_dict
-
-#%% 3) Gaussian Mixture Model
-
-# Concateno le posizioni di tutti i picchi di tutti i pazienti e faccio reshape perchè così serve all'algoritmo GMM di sklearn
-all_peaks_positions = pd.DataFrame()
-
-for patient, patient_peaks in all_peaks.items():
-    
-    peaks_positions = pd.DataFrame(patient_peaks['Positions'])
-    peaks_positions.columns = ['Peaks']
-    peaks_positions.index = [patient + f"_peak_{i}" for i in np.arange(1, peaks_positions.shape[0] + 1, 1)]
-    
-    all_peaks_positions = pd.concat([all_peaks_positions, peaks_positions], axis = 0)
-    
-    del patient, patient_peaks, peaks_positions
-
-del all_peaks
-
-# Selezione del numero ottimale di componenti usando BIC
-bic_scores = {}
-gm_models = {}
-max_components = 19
-
-for n in range(2, max_components + 1):
-    
-    # Definizione del modello GMM
-    gm = GaussianMixture(n_components = n, covariance_type = 'full', random_state = n)
-    
-    # Fit del modello
-    gm.fit(all_peaks_positions.values)
-    bic = round(gm.bic(all_peaks_positions.values), 3)
-    bic_scores[f"components_{n}"] = bic
-    gm_models[f"components_{n}"] = gm
-    
-    # Plot
-    x = np.linspace(all_peaks_positions.min()-10, all_peaks_positions.max()+10, 1000).reshape(-1,1)
-    logprob = gm.score_samples(x)
-    pdf = np.exp(logprob)
-    
-    plt.hist(all_peaks_positions, bins=100, density=True, alpha=0.5, color='gray')
-    plt.plot(x, pdf, color='red', lw=2)
-    plt.xlabel('Raman shift (cm^-1)')
-    plt.ylabel('Density')
-    plt.ylim((0, 0.006))
-    plt.title(f'Univariate GMM fit with {n} components\nBIC = {bic}.')
-    plt.show()
-    
-    del gm, bic, x, logprob, pdf
-del n, max_components
-    
-
-# Numero ottimale di componenti
-best_idx = min(bic_scores, key = bic_scores.get)
-best_gm = gm_models[best_idx]
-best_bic = round(best_gm.bic(all_peaks_positions.values), 3)
-best_idx = int(best_idx[-2:])
-print(f"Optimal number of components: {best_idx}")
-
-del bic_scores, gm_models
-
-# Visualizzazione
-x = np.linspace(all_peaks_positions.min()-10, all_peaks_positions.max()+10, 1000).reshape(-1,1)
-logprob = best_gm.score_samples(x)
-pdf = np.exp(logprob)
-
-plt.hist(all_peaks_positions, bins=100, density=True, alpha=0.5, color='gray')
-plt.plot(x, pdf, color='blue', lw=2)
-plt.xlabel('Raman shift (cm^-1)')
-plt.ylabel('Density')
-plt.ylim((0, 0.006))
-plt.title(f'Best Univariate GMM fit with {best_idx} components.\nLowest BIC = {best_bic}.')
-plt.show()
-
-# del x, logprob, pdf, all_peaks_positions
+# Save complete df
+df_final.to_parquet(proc_path / "data.parquet", index=True)  
