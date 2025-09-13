@@ -106,7 +106,7 @@ class ParallelModelTrainer:
         start_time = time.time()
 
         # Parallelizza l'esecuzione del training su tutti i fold
-        results = Parallel(n_jobs=self.n_cores, backend="loky")(
+        results = Parallel(n_jobs=self.n_cores, backend="loky", verbose=10)(
             delayed(self.process_fold)(fold_idx, train_idx, val_idx)
             for fold_idx, (train_idx, val_idx) in tqdm(enumerate(self.rskf.split(self.X, self.y)), total=n_splits)
         )
