@@ -1,3 +1,6 @@
 [submodule "Utils"]
 	path = Utils
 	url = https://github.com/mmorelli1656/Utils.git
+[submodule "ML"]
+	path = ML
+	url = git@github.com:mmorelli1656/ML.git
