@@ -92,7 +92,7 @@ class ParallelModelTrainer:
         n_splits = self.rskf.get_n_splits(self.X, self.y)
         start_time = time.time()
 
-        results = Parallel(n_jobs=self.n_cores, backend="loky")(
+        results = Parallel(n_jobs=self.n_cores, backend="loky", verbose=10)(
             delayed(process_fold)(
                 self.X, self.y, train_idx, val_idx,
                 self.scaler, self.model,
