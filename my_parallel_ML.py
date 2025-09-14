@@ -130,81 +130,48 @@ class ParallelModelTrainer:
         return df_feature_sel
     
     def get_predictions(self, results):
-        """
-        Restituisce un DataFrame con le predizioni dei fold in cross-validation.
-        La prima colonna "Label" contiene i valori originali di y.
-        """
-        # Creiamo un dizionario con le chiavi uguali agli indici della Series y
-        # Ogni chiave conterrà la lista delle predizioni corrispondenti a quell'indice
-        predictions_dict = {idx: [] for idx in self.y.index}
+        # Creiamo il dict con chiavi int
+        predictions_dict = {int(idx): [] for idx in self.y.index}
     
-        # Iteriamo sui risultati di ciascun fold
         for result in results:
-            # result.val_idx contiene gli indici originali della Series y per il fold di validazione
             for i, idx in enumerate(result.val_idx):
-                # Inseriamo la predizione corrispondente al fold nel dict
-                # idx è già un indice valido della Series y, non serve loc qui
-                predictions_dict[idx].append(result.y_pred[i])
+                predictions_dict[int(idx)].append(result.y_pred[i])  # convertiamo idx a int
     
-        # Creiamo il DataFrame dai dizionari, orientato per indice
         df_pred = pd.DataFrame.from_dict(predictions_dict, orient="index")
-    
-        # Inseriamo la colonna "Label" prendendo i valori originali di y
-        # Qui usiamo .loc per allineare i valori della Series agli indici del DataFrame
-        df_pred.insert(0, "Label", self.y.loc[df_pred.index])
-    
-        # Rinominiamo le colonne delle predizioni come Iter_1, Iter_2, ...
+        df_pred.insert(0, "Label", self.y.astype(float))  # opzionale: uniforma i tipi
         df_pred.columns = ["Label"] + [f"Iter_{i + 1}" for i in range(df_pred.shape[1] - 1)]
-    
-        # Ordiniamo per indice (utile se l'ordine dei fold non è consecutivo)
         df_pred = df_pred.sort_index()
-    
         return df_pred
-    
-    
+
     def get_predictions_proba(self, results):
-        """
-        Restituisce un DataFrame (o lista di DataFrame) con le probabilità predette dai fold.
-        Funziona sia con una classe da salvare sia con più classi.
-        """
         if not hasattr(self, "classi_da_salvare") or self.classi_da_salvare is None:
             return None
     
         classi_da_salvare = self.classi_da_salvare
-    
-        # Creiamo un dizionario annidato: 
-        # chiavi = classi da salvare, valori = dict con chiavi = indici della Series y
         predictions_proba_dict = {
-            class_idx: {idx: [] for idx in self.y.index} for class_idx in classi_da_salvare
+            class_idx: {int(idx): [] for idx in self.y.index} for class_idx in classi_da_salvare
         }
     
-        # Iteriamo sui risultati dei fold
         for result in results:
             for i, idx in enumerate(result.val_idx):
-                # idx è l'indice originale della Series y
-                # Caso: 1 sola classe → scalare
+                idx = int(idx)  # convertiamo anche qui a int
                 if isinstance(result.y_pred_proba[i], (float, np.floating)):
                     class_idx = classi_da_salvare[0]
                     predictions_proba_dict[class_idx][idx].append(result.y_pred_proba[i])
                 else:
-                    # Caso: più classi → result.y_pred_proba[i] è un array di probabilità
                     for class_idx in classi_da_salvare:
                         predictions_proba_dict[class_idx][idx].append(result.y_pred_proba[i][class_idx])
     
-        # Convertiamo i dizionari in DataFrame
         df_pred_proba_list = []
         for class_idx in classi_da_salvare:
             df_class = pd.DataFrame.from_dict(predictions_proba_dict[class_idx], orient="index")
-            # Inseriamo la colonna "Label" usando .loc per allineare con gli indici
-            df_class.insert(0, "Label", self.y.loc[df_class.index])
+            df_class.insert(0, "Label", self.y.astype(float))
             df_class.columns = ["Label"] + [f"Iter_{i + 1}" for i in range(df_class.shape[1] - 1)]
             df_class = df_class.sort_index()
             df_pred_proba_list.append(df_class)
     
-        # Se c'è solo una classe, restituiamo un singolo DataFrame
         return df_pred_proba_list[0] if len(classi_da_salvare) == 1 else df_pred_proba_list
 
-    
     def get_scaler_model(self, results):
         return [(result.scaler, result.model) for result in results]
     
