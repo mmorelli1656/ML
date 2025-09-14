@@ -50,7 +50,7 @@ class ParallelModelTrainer:
 
     def process_fold(self, fold_idx, train_idx, val_idx):
         X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
-        y_train, y_val = self.y[train_idx], self.y[val_idx]
+        y_train, y_val = self.y.iloc[train_idx], self.y.iloc[val_idx]
         
         # 1) Feature selection sul train originale
         for selector in self.feature_selectors:
@@ -103,26 +103,12 @@ class ParallelModelTrainer:
     
     def parallel_training(self):
         n_splits = self.rskf.get_n_splits(self.X, self.y)
-        start_time = time.time()
 
         # Parallelizza l'esecuzione del training su tutti i fold
         results = Parallel(n_jobs=self.n_cores, backend="loky", verbose=10)(
             delayed(self.process_fold)(fold_idx, train_idx, val_idx)
             for fold_idx, (train_idx, val_idx) in tqdm(enumerate(self.rskf.split(self.X, self.y)), total=n_splits)
         )
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        hours = int(elapsed_time // 3600)
-        minutes = int((elapsed_time % 3600) // 60)
-        seconds = elapsed_time % 60
-        
-        if hours > 0:
-            print(f"Training time: {hours} h, {minutes} min e {seconds:.2f} sec")
-        elif minutes > 0:
-            print(f"Training time: {minutes} min e {seconds:.2f} sec")
-        else:
-            print(f"Training time: {seconds:.2f} sec")
 
         return results
 
@@ -144,7 +130,7 @@ class ParallelModelTrainer:
         return df_feature_sel
     
     def get_predictions(self, results):
-        predictions_dict = {i: [] for i in range(len(self.y))}
+        predictions_dict = {idx: [] for idx in self.y.index}
     
         for result in results:
             for i, idx in enumerate(result.val_idx):
@@ -163,7 +149,7 @@ class ParallelModelTrainer:
     
         classi_da_salvare = self.classi_da_salvare
         predictions_proba_dict = {
-            class_idx: {i: [] for i in range(len(self.y))}
+            class_idx: {idx: [] for idx in self.y.index}
             for class_idx in classi_da_salvare
         }
     
