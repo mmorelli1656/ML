@@ -130,42 +130,52 @@ class ParallelModelTrainer:
         return df_feature_sel
     
     def get_predictions(self, results):
-        # Creiamo il dict con chiavi int
-        predictions_dict = {int(idx): [] for idx in self.y.index}
+        """
+        Restituisce un DataFrame con le predizioni dei fold.
+        Funziona con qualsiasi tipo di indice di y (numerico o stringa).
+        """
+        # Creiamo il dict con gli indici originali della Series y
+        predictions_dict = {idx: [] for idx in self.y.index}
     
         for result in results:
-            for i, idx in enumerate(result.val_idx):
-                predictions_dict[int(idx)].append(result.y_pred[i])  # convertiamo idx a int
+            for i, pos in enumerate(result.val_idx):
+                # Mapposizione del fold → indice reale di y
+                real_idx = self.y.index[pos]
+                predictions_dict[real_idx].append(result.y_pred[i])
     
         df_pred = pd.DataFrame.from_dict(predictions_dict, orient="index")
-        df_pred.insert(0, "Label", self.y.astype(float))  # opzionale: uniforma i tipi
+        df_pred.insert(0, "Label", self.y)
         df_pred.columns = ["Label"] + [f"Iter_{i + 1}" for i in range(df_pred.shape[1] - 1)]
         df_pred = df_pred.sort_index()
         return df_pred
 
     def get_predictions_proba(self, results):
+        """
+        Restituisce un DataFrame (o lista di DataFrame) con le probabilità dei fold.
+        Funziona con qualsiasi tipo di indice di y.
+        """
         if not hasattr(self, "classi_da_salvare") or self.classi_da_salvare is None:
             return None
     
         classi_da_salvare = self.classi_da_salvare
         predictions_proba_dict = {
-            class_idx: {int(idx): [] for idx in self.y.index} for class_idx in classi_da_salvare
+            class_idx: {idx: [] for idx in self.y.index} for class_idx in classi_da_salvare
         }
     
         for result in results:
-            for i, idx in enumerate(result.val_idx):
-                idx = int(idx)  # convertiamo anche qui a int
+            for i, pos in enumerate(result.val_idx):
+                real_idx = self.y.index[pos]
                 if isinstance(result.y_pred_proba[i], (float, np.floating)):
                     class_idx = classi_da_salvare[0]
-                    predictions_proba_dict[class_idx][idx].append(result.y_pred_proba[i])
+                    predictions_proba_dict[class_idx][real_idx].append(result.y_pred_proba[i])
                 else:
                     for class_idx in classi_da_salvare:
-                        predictions_proba_dict[class_idx][idx].append(result.y_pred_proba[i][class_idx])
+                        predictions_proba_dict[class_idx][real_idx].append(result.y_pred_proba[i][class_idx])
     
         df_pred_proba_list = []
         for class_idx in classi_da_salvare:
             df_class = pd.DataFrame.from_dict(predictions_proba_dict[class_idx], orient="index")
-            df_class.insert(0, "Label", self.y.astype(float))
+            df_class.insert(0, "Label", self.y)
             df_class.columns = ["Label"] + [f"Iter_{i + 1}" for i in range(df_class.shape[1] - 1)]
             df_class = df_class.sort_index()
             df_pred_proba_list.append(df_class)
