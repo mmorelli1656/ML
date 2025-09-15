@@ -12,7 +12,7 @@ Created on Sun Mar 23 19:24:29 2025
 @author: mik16
 """
 
-#%%
+#%% Libreries
 
 import numpy as np
 import pandas as pd
@@ -21,141 +21,182 @@ from sklearn.preprocessing import MinMaxScaler
 from scipy.stats import pearsonr
 
 
-#%%
+#%% Feature selection methods
 
+# ==============================================================
+# Variance feature selection (numerical continuos)
+# ==============================================================
 class FeaturesVariance(BaseEstimator, TransformerMixin):
+    """
+    Feature selector that removes low-variance features from a dataset.
+
+    This transformer selects features based on their variance, with two possible
+    threshold modes:
+    1. 'percentile': select features above a given percentile of variances.
+    2. 'max_percentage': select features above a percentage of the maximum variance.
+
+    Parameters
+    ----------
+    threshold_value : float, default=90
+        Threshold for feature selection. Interpreted according to `mode`.
+        Must be between 0 and 100.
+    mode : {'percentile', 'max_percentage'}, default='percentile'
+        Method to calculate the variance threshold:
+        - 'percentile': select features with variance above the given percentile.
+        - 'max_percentage': select features with variance above a percentage of the maximum variance.
+
+    Attributes
+    ----------
+    threshold_ : float
+        Calculated variance threshold after fitting.
+    selected_features_ : ndarray of int
+        Indices of the selected features.
+    input_features_ : ndarray of str
+        Names of the input features (from DataFrame columns or generated as x0, x1, ...).
+    _output_format : str
+        Output format, either 'default' (NumPy array) or 'pandas' (DataFrame).
+    _is_dataframe : bool
+        Whether the input X during fit was a DataFrame.
+    """
+
     def __init__(self, threshold_value=90, mode="percentile"):
-        """
-        Inizializza il selettore con due modalità di calcolo della soglia di varianza.
-        
-        :param threshold_value: Percentile (0-100) o percentuale della varianza massima (0-100).
-                                Se 'mode' è 'percentile', il valore rappresenta il percentile della varianza
-                                delle feature da mantenere. Se 'mode' è 'max_percentage', il valore rappresenta
-                                la percentuale della varianza massima da mantenere.
-        :param mode: Modalità di calcolo per la soglia di varianza. Può essere:
-                     - 'percentile': seleziona un percentile specificato della varianza delle feature.
-                     - 'max_percentage': seleziona una percentuale della varianza massima delle feature.
-        """
-        # Verifica che la modalità sia corretta
         if mode not in ["percentile", "max_percentage"]:
-            raise ValueError(f"Il parametro mode deve essere 'percentile' o 'max_percentage'. Valore fornito: {mode}")
-        
-        # Verifica che il valore della soglia sia valido
+            raise ValueError(f"mode must be 'percentile' or 'max_percentage'. Got: {mode}")
+
         if not (0 < threshold_value < 100):
-            raise ValueError("threshold_value deve essere strettamente compreso tra 0 e 100. Valore fornito: {}".format(threshold_value))
-        
+            raise ValueError(
+                f"threshold_value must be strictly between 0 and 100. Got: {threshold_value}"
+            )
+
         self.threshold_value = threshold_value
         self.mode = mode
-        self._output_format = 'default'  # Imposta il formato dell'output come array NumPy di default
+        self._output_format = 'default'
 
     def set_output(self, *, transform=None):
         """
-        Imposta il formato dell'output del metodo transform.
-        
-        :param transform: 'default' per array NumPy o 'pandas' per DataFrame. Se None, viene utilizzato il formato di default.
-        :return: Restituisce l'oggetto stesso per un uso a catena del metodo.
+        Set the output format for the transform method.
+
+        Parameters
+        ----------
+        transform : {'default', 'pandas', None}, optional
+            - 'default': return a NumPy array (default).
+            - 'pandas': return a DataFrame with column names.
+            - None: keep the current format.
+
+        Returns
+        -------
+        self : object
+            Returns the transformer itself.
         """
-        # Verifica che il formato di output sia uno dei valori consentiti
         if transform not in [None, 'default', 'pandas']:
-            raise ValueError(f"transform deve essere 'default', 'pandas' o None. Valore fornito: {transform}")
-        
-        # Imposta il formato di output
+            raise ValueError(f"transform must be 'default', 'pandas', or None. Got: {transform}")
         self._output_format = 'default' if transform is None else transform
         return self
 
     def fit(self, X, y=None):
         """
-        Calcola la varianza per ogni feature e seleziona le feature in base alla soglia specificata.
+        Compute feature variances and determine which features to keep.
 
-        :param X: DataFrame o array numpy contenente le features.
-        :param y: Non utilizzato in questa fase, presente per coerenza con l'interfaccia di scikit-learn.
-        :return: Restituisce l'oggetto stesso per un uso a catena del metodo.
+        Parameters
+        ----------
+        X : {array-like, DataFrame} of shape (n_samples, n_features)
+            Input data.
+        y : Ignored
+            Not used, present for API consistency.
+
+        Returns
+        -------
+        self : object
+            Fitted transformer.
         """
-        # Verifica se X è un DataFrame
+        # Check if input is a DataFrame
         self._is_dataframe = isinstance(X, pd.DataFrame)
-        
-        # Se X è un DataFrame, convertilo in array numpy per l'elaborazione
-        X_values = X.values if self._is_dataframe else X
-        
-        # Controllo su eventuali NaN nei dati
-        if np.isnan(X_values).any():
-            print("Errore: sono presenti valori NaN nei dati forniti a 'fit'. Rimuoverli o imputarli prima.")
-            raise ValueError("Valori NaN trovati in X.")
 
-        # Normalizza le features per avere valori tra 0 e 1
+        # Convert to NumPy array for calculations
+        X_values = X.values if self._is_dataframe else np.asarray(X)
+
+        # Raise error if NaNs are present
+        if np.isnan(X_values).any():
+            raise ValueError("NaN values detected in X. Remove or impute them before fitting.")
+
+        # Scale features to [0, 1] range
         scaler = MinMaxScaler()
         X_scaled = scaler.fit_transform(X_values)
-        
-        # Calcola la varianza di ogni feature (colonna) del dataset
+
+        # Compute variance for each feature
         variances = np.var(X_scaled, axis=0)
 
-        # Calcola la soglia in base alla modalità specificata
+        # Determine threshold based on selected mode
         if self.mode == "percentile":
-            # Calcola il percentile specificato della varianza
             threshold = np.percentile(variances, self.threshold_value)
-        elif self.mode == "max_percentage":
-            # Calcola una percentuale della varianza massima
-            max_var = np.max(variances)
-            threshold = (self.threshold_value / 100) * max_var
+        else:  # max_percentage
+            threshold = (self.threshold_value / 100) * np.max(variances)
 
-        # Imposta la soglia e le feature selezionate
         self.threshold_ = threshold
+
+        # Store indices of features above threshold
         self.selected_features_ = np.where(variances >= threshold)[0]
 
-        # Salva i nomi delle feature se l'input è un DataFrame
+        # Store feature names
         if self._is_dataframe:
-            self.input_features_ = X.columns
+            self.input_features_ = np.array(X.columns)
         else:
-            # Se l'input non è un DataFrame, usa nomi generici per le colonne
-            self.input_features_ = [f"x{i}" for i in range(X.shape[1])]
+            self.input_features_ = np.array([f"x{i}" for i in range(X.shape[1])])
 
         return self
 
     def transform(self, X):
         """
-        Seleziona solo le feature che superano la soglia di varianza.
+        Reduce X to the selected features.
 
-        :param X: DataFrame o array numpy contenente le features.
-        :return: Le features selezionate in base alla varianza.
+        Parameters
+        ----------
+        X : {array-like, DataFrame} of shape (n_samples, n_features)
+            Input data to transform.
+
+        Returns
+        -------
+        X_reduced : {ndarray, DataFrame}
+            Input data with only selected features.
         """
-        # Se X è un DataFrame, convertilo in array numpy per l'elaborazione
-        X_values = X.values if isinstance(X, pd.DataFrame) else X
-        
-        # Seleziona solo le colonne che sono state selezionate durante il fitting
+        X_values = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
         transformed = X_values[:, self.selected_features_]
 
-        # Restituisce il formato di output richiesto
+        # Return as DataFrame if requested
         if self._output_format == 'pandas':
-            # Se il formato richiesto è pandas, restituisci un DataFrame con i nomi delle feature selezionate
-            selected_names = self.get_feature_names_out(self.input_features_)
+            selected_names = self.get_feature_names_out()
             return pd.DataFrame(transformed, columns=selected_names, index=getattr(X, 'index', None))
-        
-        # Altrimenti restituisci l'array NumPy
+
+        # Otherwise return NumPy array
         return transformed
 
     def fit_transform(self, X, y=None):
-        """
-        Esegue fit e poi trasforma i dati in un solo passaggio.
-        
-        :param X: DataFrame o array numpy contenente le features.
-        :param y: Non utilizzato in questa fase, presente per coerenza con l'interfaccia di scikit-learn.
-        :return: Le features selezionate in base alla varianza.
-        """
-        # Esegue fit e trasforma in un solo passaggio
+        """Fit to data, then transform it."""
         return self.fit(X, y).transform(X)
 
     def get_feature_names_out(self, input_features=None):
         """
-        Restituisce i nomi delle feature selezionate.
+        Get the names of the selected features.
 
-        :param input_features: Lista/array dei nomi originali.
-        :return: I nomi delle feature selezionate.
+        Parameters
+        ----------
+        input_features : array-like of str, optional
+            Original feature names. If None, uses names stored during fit.
+
+        Returns
+        -------
+        selected_feature_names : ndarray of str
+            Names of the selected features.
+
+        Raises
+        ------
+        AttributeError
+            If transformer is called before fitting and no input_features are provided.
         """
-        # Se non vengono forniti i nomi delle feature, usa quelli memorizzati durante il fitting
         if input_features is None:
-            input_features = getattr(self, 'input_features_', [f"x{i}" for i in range(len(self.selected_features_))])
-        
-        # Restituisce i nomi delle feature selezionate
+            input_features = getattr(self, 'input_features_', None)
+            if input_features is None:
+                raise AttributeError("Transformer has not been fitted yet.")
         return np.array(input_features)[self.selected_features_]
 
 
