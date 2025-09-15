@@ -161,3 +161,87 @@ def correlation_histogram(X, bins='auto', threshold=None, method='pearson', save
 
     return corr_values
 
+
+# ==============================================================
+# Eta**2 histogram
+# ==============================================================
+def eta_squared_histogram(X, y, bins='auto', threshold=None, save_path=None):
+    """
+    Compute eta squared (η²) for each numeric feature relative to a categorical target
+    and plot a histogram of the η² values.
+
+    Optionally, a vertical line can indicate a threshold for feature selection.
+
+    Parameters
+    ----------
+    X : pandas.DataFrame
+        Input DataFrame containing numeric features.
+    y : array-like of shape (n_samples,)
+        Categorical target.
+    bins : int, sequence, or str, default='auto'
+        Number of bins or method for histogram calculation (as in plt.hist).
+    threshold : float or None, default=None
+        Threshold of η² to highlight in the histogram (0 <= threshold <= 1).
+    save_path : str or None, default=None
+        Path to save the figure. If None, the figure is displayed.
+
+    Returns
+    -------
+    eta_values : pandas.Series
+        Series containing the η² values for each feature.
+    """
+    # Check all columns are numeric
+    if not np.all([np.issubdtype(dtype, np.number) for dtype in X.dtypes]):
+        raise TypeError("All columns must be numeric continuous.")
+
+    # Convert target to numpy array
+    y = np.array(y)
+    
+    # Compute eta squared for each feature
+    eta_values = []
+    for col in X.columns:
+        values = X[col].values
+        overall_mean = np.mean(values)
+        df = pd.DataFrame({'target': y, 'feature': values})
+        grouped = df.groupby('target')['feature']
+        group_counts = grouped.count()
+        group_means = grouped.mean()
+        ss_between = np.sum(group_counts * (group_means - overall_mean) ** 2)
+        ss_total = np.sum((values - overall_mean) ** 2)
+        eta = ss_between / ss_total if ss_total > 0 else 0
+        eta_values.append(eta)
+
+    eta_series = pd.Series(eta_values, index=X.columns)
+
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(eta_series, bins=bins, color='skyblue', edgecolor='black')
+
+    # Highlight threshold if provided
+    if threshold is not None:
+        if not (0 <= threshold <= 1):
+            raise ValueError("threshold must be between 0 and 1.")
+        plt.axvline(
+            threshold,
+            color='red',
+            linestyle='--',
+            linewidth=2,
+            label=f'Threshold = {threshold:.2f}'
+        )
+        plt.legend(fontsize=12)
+
+    # Add labels, title, and grid
+    plt.title('Distribution of Eta Squared (η²) Values', fontsize=16)
+    plt.xlabel('Eta Squared (η²)', fontsize=14)
+    plt.ylabel('Number of features', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+
+    # Save or show figure
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+    return eta_series
