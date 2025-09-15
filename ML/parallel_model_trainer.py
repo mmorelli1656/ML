@@ -144,37 +144,15 @@ class ParallelModelTrainer:
             else:
                 y_pred_proba = proba[:, self.classes_to_save]
         return y_pred, y_pred_proba
-
-    # ------------------------------------------------------------------
-    # Process a single fold
-    # ------------------------------------------------------------------
-    def process_fold(self, fold_idx: int, train_idx: np.ndarray, val_idx: np.ndarray) -> FoldResult:
-        """Run feature selection, balancing, scaling, training, and prediction for one fold."""
-        X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
-        y_train, y_val = self.y.iloc[train_idx], self.y.iloc[val_idx]
-
-        # Apply feature selection
-        X_train, X_val, selected_features = self._apply_feature_selection(X_train, y_train, X_val)
-
-        # Apply balancing
-        X_train, y_train = self._apply_balancer(X_train, y_train, selected_features)
-
-        # Apply scaling
-        X_train_scaled, X_val_scaled, scaler = self._apply_scaler(X_train, X_val)
-
-        # Train model
-        model = self._train_model(X_train_scaled, y_train, X_val_scaled, y_val)
-
-        # Predictions
-        y_pred, y_pred_proba = self._get_fold_predictions(model, X_val_scaled, y_val, selected_features)
-
-        return self.FoldResult(fold_idx, val_idx, selected_features, scaler, model, y_pred, y_pred_proba)
-
+    
     # ------------------------------------------------------------------
     # Parallel training
     # ------------------------------------------------------------------
-    def parallel_training(self) -> List[FoldResult]:
-        """Run all folds in parallel using joblib."""
+    def parallel_training(self) -> list:
+        """
+        Run all folds in parallel using joblib, Windows-friendly version.
+        """
+    
         max_cores = cpu_count()
         print(f"[INFO] Maximum available cores: {max_cores}")
     
@@ -184,15 +162,30 @@ class ParallelModelTrainer:
     
         n_splits = self.rkf.get_n_splits(self.X, self.y)
     
+        # Build serializable parameters
+        trainer_params = {
+            "X": self.X,
+            "y": self.y,
+            "rkf": self.rkf,
+            "scaler": self.scaler,
+            "model": self.model,
+            "balancer": self.balancer,
+            "feature_selectors": self.feature_selectors,
+            "classes_to_save": self.classes_to_save,
+            "n_cores": 1  # Important: avoid recursion in child processes
+        }
+    
         results = Parallel(
-            n_jobs=self.n_cores,  # se > max_cores, joblib lo limita automaticamente
+            n_jobs=self.n_cores,
             backend="loky"
         )(
-            delayed(self.process_fold)(fold_idx, train_idx, val_idx)
+            delayed(process_fold_global)(trainer_params, fold_idx, train_idx, val_idx)
             for fold_idx, (train_idx, val_idx) in tqdm(
-                enumerate(self.rkf.split(self.X, self.y)), total=n_splits
+                enumerate(self.rkf.split(self.X, self.y)),
+                total=n_splits
             )
         )
+    
         return results
 
     # ------------------------------------------------------------------
@@ -285,3 +278,37 @@ class ParallelModelTrainer:
             "feature_selection": self.get_feature_selection(results),
             "scaler_model": self.get_scaler_model(results),
         }
+
+# -----------------------------
+# Function at module level
+# -----------------------------
+def process_fold_global(trainer_params: dict, fold_idx: int, train_idx: np.ndarray, val_idx: np.ndarray):
+    """
+    Picklable function to execute a single fold.
+    trainer_params contains all serializable parameters to reconstruct the trainer.
+    """
+    # Reconstruct minimal trainer
+    trainer = ParallelModelTrainer(**trainer_params)
+
+    X_train, X_val = trainer.X.iloc[train_idx], trainer.X.iloc[val_idx]
+    y_train, y_val = trainer.y.iloc[train_idx], trainer.y.iloc[val_idx]
+
+    # Feature selection
+    X_train, X_val, selected_features = trainer._apply_feature_selection(X_train, y_train, X_val)
+
+    # Balancing
+    X_train, y_train = trainer._apply_balancer(X_train, y_train, selected_features)
+
+    # Scaling
+    X_train_scaled, X_val_scaled, scaler = trainer._apply_scaler(X_train, X_val)
+
+    # Training
+    model = trainer._train_model(X_train_scaled, y_train, X_val_scaled, y_val)
+
+    # Predictions
+    y_pred, y_pred_proba = trainer._get_fold_predictions(model, X_val_scaled, y_val, selected_features)
+
+    return trainer.FoldResult(fold_idx, val_idx, selected_features, scaler, model, y_pred, y_pred_proba)
+
+
+
