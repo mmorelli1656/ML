@@ -9,24 +9,24 @@ Created on Sat Sep 13 16:42:29 2025
 
 import sys
 import pandas as pd
-import os
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import xgboost as xgb
-from sklearn.linear_model import LogisticRegression
-import joblib
+# from sklearn.linear_model import LogisticRegression
 from joblib import cpu_count
 from pathlib import Path
     
-# Submodules utilities
+# Imports from project subtrees
 from Utils.project_paths import ProjectPaths
+from Utils.elapsed_timer import Timer
+
 from ML.my_featsel import FeaturesVariance, FeaturesPearson
 from ML.my_parallel_ML import ParallelModelTrainer
 from ML.my_eval import EvaluationMetrics
 
-sys.path.append(r"C:\Users\mik16\Github\Kell")  # cartella che contiene ML
+sys.path.append(str(Path.cwd().resolve() / "ML"))
 
 
 #%% Functions
@@ -89,38 +89,56 @@ X = pd.read_parquet(proc_path / "data.parquet")
 
 # Extract label
 y = X.pop("Truth")
+y.name = "Label"    # rinomina la Series in "label"
 
 del proc_path
 
 
 #%% Istogramma delle varianze
 
-_ = variance_histogram(X, bins='auto', percentile=90)
+_ = variance_histogram(X, bins='auto', percentile=50)
 
 
 #%% Pipeline
 
 # Inizializza la CV
 rskf = RepeatedStratifiedKFold(
-    n_splits=10,        # numero di fold
+    n_splits=20,        # numero di fold
     n_repeats=100,       # numero ripetizioni
     random_state=42   # riproducibilità
 )
 
 # Inizializza i metodi di FS
-feature_selectors = [FeaturesVariance(threshold_value=90, mode='percentile'),
-                     FeaturesPearson(threshold=0.9, alpha=0.01, random_state=42)]
+feature_selectors = [FeaturesVariance(threshold_value=60, mode='percentile'),
+                     FeaturesPearson(threshold=0.80, alpha=0.01, random_state=42)]
+
+feature_selectors = [FeaturesPearson(threshold=0.80, alpha=0.01, random_state=42)]
 
 # Inizializza lo scaler
 scaler = StandardScaler()
 
-# Modello base con parametri fissi
+# # Modello base con parametri fissi
+# model = xgb.XGBClassifier(
+#     eval_metric='logloss',
+#     n_jobs=-1,
+#     early_stopping_rounds=10,
+#     random_state=42
+# )
+
 model = xgb.XGBClassifier(
+    n_estimators=100,
+    eta=0.03,
+    max_depth=5,
+    gamma=0,
+    subsample=1,
+    colsample_bytree=1,
+    scale_pos_weight=1,
     eval_metric='logloss',
     n_jobs=-1,
-    early_stopping_rounds=20,
+    early_stopping_rounds=10,
     random_state=42
 )
+
 
 # Parametri XGB per 60% con M>=5
 # model = xgb.XGBClassifier(
@@ -147,11 +165,12 @@ print(f"Numero di core logici disponibili: {cpu_count()}")
 
 # Inizializza l'addestramento parallelo
 trainer = ParallelModelTrainer(X, y, rskf, scaler, model, balancer=None,
-                               feature_selectors=None,
+                               feature_selectors=feature_selectors,
                                classi_da_salvare=[0,1])
 
 # Addestra in parallelo
-results = trainer.parallel_training()
+with Timer():
+    results = trainer.parallel_training()
 
 # Estrai i risultati
 df_feat_sel = trainer.get_feature_selection(results)
@@ -160,7 +179,7 @@ list_df_pred_proba = trainer.get_predictions_proba(results)
 # list_scaler_model = trainer.get_scaler_model(results)
 
 # Estrai tutti i risultati
-final_results = trainer.get_all(results)
+# final_results = trainer.get_all(results)
 
 # Salvataggio risultati
 # save_results(final_results, results_path, save_scalers=False, save_models=False)
@@ -171,7 +190,7 @@ columns_with_ones_dict = {
     for idx, row in df_feat_sel.iterrows()
 }
 
-del rskf, feature_selectors, scaler, model, trainer
+# del rskf, feature_selectors, scaler, model, trainer
 
 
 #%% Valutazione dei modelli 
@@ -189,14 +208,14 @@ evaluator = EvaluationMetrics(df_pred=df_pred, df_pred_proba=df_pred_proba,
 df_metrics = evaluator.compute_metrics()
 
 # Plot della CM
-classes_name = ['Non-Earthquake', 'Earthquake']
+classes_name = ['No Antigen', 'Antigen']
 evaluator.plot_confusion_matrix(perc='row', stat_method="mean_std",
-                                classes=classes_name, save_path=image_path)
+                                classes=classes_name, save_path=None)
 
 # Plot ROCs
-evaluator.plot_roc_curve(stat_method="mean_std", save_path=image_path)
+evaluator.plot_roc_curve(stat_method="mean_std", save_path=None)
 
 # Plot boxplots delle metriche
-evaluator.plot_metrics_boxplot(df_metrics, save_path=image_path)
+evaluator.plot_metrics_boxplot(df_metrics, save_path=None)
 
-del classes_name, df_pred_proba, evaluator
+# del classes_name, df_pred_proba, evaluator
