@@ -300,9 +300,9 @@ class FeaturesPearson(BaseEstimator, TransformerMixin):
                 _, p_value = pearsonr(X_df.iloc[:, i], X_df.iloc[:, j])
                 if p_value < self.alpha:
                     # Remove feature with lower variance
-                    if variances[i] < variances[j]:
+                    if variances.iloc[i] < variances.iloc[j]:
                         selected_mask[i] = False
-                    elif variances[j] < variances[i]:
+                    elif variances.iloc[j] < variances.iloc[i]:
                         selected_mask[j] = False
                     else:
                         # If equal, remove randomly
