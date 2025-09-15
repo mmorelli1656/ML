@@ -85,3 +85,79 @@ def variance_histogram(X, bins=20, percentile=None, save_path=None):
 
     # Return the variances for further use
     return variances
+
+
+# ==============================================================
+# Feature correlation histogram
+# ==============================================================
+def correlation_histogram(X, bins='auto', threshold=None, method='pearson', save_path=None):
+    """
+    Compute pairwise correlations between numerical features and plot a histogram.
+
+    Optionally, a vertical line can be added to indicate a correlation threshold.
+
+    Parameters
+    ----------
+    X : pandas.DataFrame
+        Input DataFrame containing numerical features.
+    bins : int, sequence, or str, default='auto'
+        Number of bins or method for histogram calculation (as in plt.hist).
+    threshold : float or None, optional
+        Correlation value to highlight with a vertical line. Must be between 0 and 1.
+    method : {'pearson', 'spearman', 'kendall'}, default='pearson'
+        Method to compute correlations.
+    save_path : str or None, default=None
+        File path to save the figure. If None, the figure is displayed.
+
+    Returns
+    -------
+    corr_values : pandas.Series
+        Series of correlation values (absolute) for each unique feature pair.
+    """
+    # Check that all columns are numeric
+    if not np.all([np.issubdtype(dtype, np.number) for dtype in X.dtypes]):
+        raise TypeError("All columns must be numeric continuous.")
+
+    # Compute correlation matrix
+    corr_matrix = X.corr(method=method).abs()
+
+    # Extract upper triangle (without diagonal) as 1D array
+    upper_tri_indices = np.triu_indices_from(corr_matrix, k=1)
+    corr_values = corr_matrix.values[upper_tri_indices]
+
+    # Convert to pandas Series for convenience
+    corr_values = pd.Series(corr_values)
+
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(corr_values, bins=bins, color='lightgreen', edgecolor='black')
+
+    # Highlight threshold if specified
+    if threshold is not None:
+        if not (0 <= threshold <= 1):
+            raise ValueError("threshold must be between 0 and 1.")
+        plt.axvline(
+            threshold,
+            color='red',
+            linestyle='--',
+            linewidth=2,
+            label=f'Threshold = {threshold:.2f}'
+        )
+        plt.legend(fontsize=12)
+
+    # Add labels and grid
+    plt.title('Distribution of Feature Correlations', fontsize=16)
+    plt.xlabel('Correlation (absolute value)', fontsize=14)
+    plt.ylabel('Number of feature pairs', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+
+    # Save figure or show
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+    return corr_values
+
