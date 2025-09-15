@@ -541,29 +541,45 @@ class TargetEtaSquared(BaseEstimator, TransformerMixin):
 
 
 # ==============================================================
-# Eta**2 feature selection (continuous numerical features - categorical target)
+# Pearson correlation with target feature selection (continuous numerical features - continuous numerical target)
 # ==============================================================
 class TargetPearson(BaseEstimator, TransformerMixin):
+    """
+    Feature selector based on Pearson correlation between numeric features and a continuous target.
+
+    This selector computes the Pearson correlation coefficient and associated p-value 
+    for each numeric feature with respect to a continuous target. Features with a 
+    correlation above a threshold and a p-value below a significance level are selected.
+
+    Parameters
+    ----------
+    threshold_value : float, default=0.1
+        Threshold for feature selection. Can be absolute (0-1) or percentile.
+    p_value_threshold : float, default=0.05
+        Significance level for the correlation p-value.
+    mode : {'absolute', 'percentile'}, default='absolute'
+        Mode to interpret threshold_value. 'absolute' uses a fixed correlation value,
+        'percentile' uses the specified percentile of all correlations.
+
+    Attributes
+    ----------
+    selected_features_ : list of int
+        Indices of features selected after fitting.
+    threshold_ : float
+        Correlation threshold used for selection.
+    input_features_ : list of str
+        Original feature names (if DataFrame provided).
+    _is_dataframe : bool
+        Whether the input X was a pandas DataFrame.
+    """
+
     def __init__(self, threshold_value=0.1, p_value_threshold=0.05, mode="absolute"):
-        """
-        Inizializza il selettore basato sulla correlazione di Pearson tra features e target.
-        
-        :param threshold_value: Soglia per la selezione delle feature (può essere un valore assoluto o un percentile).
-        :param p_value_threshold: Soglia per il p-value per considerare la correlazione significativa.
-        :param mode: Modalità per determinare la soglia di correlazione.
-                     'absolute' per una soglia assoluta, 'percentile' per un percentile della correlazione di Pearson.
-        """
-        # Verifica che il parametro 'mode' sia valido
         if mode not in ["percentile", "absolute"]:
-            raise ValueError(f"Il parametro mode deve essere 'percentile' o 'absolute'. Valore fornito: {mode}")
-        
-        # Verifica che il parametro 'threshold_value' sia compreso tra 0 e 1
+            raise ValueError(f"Mode must be 'percentile' or 'absolute'. Got: {mode}")
         if not (0 <= threshold_value <= 1):
-            raise ValueError("threshold_value deve essere un numero compreso tra 0 e 1. Valore fornito: {}".format(threshold_value))
-        
-        # Verifica che il parametro 'p_value_threshold' sia compreso tra 0 e 1
+            raise ValueError(f"threshold_value must be between 0 and 1. Got: {threshold_value}")
         if not (0 <= p_value_threshold <= 1):
-            raise ValueError("p_value_threshold deve essere un numero compreso tra 0 e 1. Valore fornito: {}".format(p_value_threshold))
+            raise ValueError(f"p_value_threshold must be between 0 and 1. Got: {p_value_threshold}")
 
         self.threshold_value = threshold_value
         self.p_value_threshold = p_value_threshold
@@ -571,104 +587,89 @@ class TargetPearson(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         """
-        Esegue la selezione delle feature in base alla correlazione di Pearson tra le features e il target.
-        
-        :param X: DataFrame o array numpy contenente le feature.
-        :param y: Target numerico continuo (array o pandas Series).
-        :return: Seleziona le feature in base alla correlazione con il target e al p-value.
-        """
-        # Verifica che il target y sia stato fornito
-        if y is None:
-            raise ValueError("Il target 'y' deve essere fornito come input.")
-            
-        # Verifica che il target 'y' sia numerico
-        if not np.issubdtype(y.dtype, np.number):
-            raise ValueError("Il target 'y' deve essere numerico.")
-        
-        # Verifica se X è un DataFrame
-        self._is_dataframe = isinstance(X, pd.DataFrame)
-        
-        # Se X è un DataFrame, convertilo in array numpy per l'elaborazione
-        X_values = X.values if self._is_dataframe else X
-        
-        # Controllo su eventuali NaN nei dati
-        if np.isnan(X_values).any():
-            print("Errore: sono presenti valori NaN nei dati forniti a 'fit'. Rimuoverli o imputarli prima.")
-            raise ValueError("Valori NaN trovati in X.")
-        
-        # Calcola la correlazione di Pearson e il p-value tra ogni feature e il target
-        correlations = []
-        p_values = []
-        for i in range(X_values.shape[1]):  # Itera su ogni feature di X
-            corr, p_val = pearsonr(X_values[:, i], y)  # Calcola la correlazione e il p-value
-            correlations.append(abs(corr))  # Usa il valore assoluto della correlazione per ignorare la direzione
-            p_values.append(p_val)  # Salva il p-value per ciascuna feature
+        Fit the selector by computing Pearson correlation and p-value for each feature.
 
-        # Imposta la soglia per la selezione delle feature in base al 'mode' scelto
+        Parameters
+        ----------
+        X : {DataFrame, ndarray} of shape (n_samples, n_features)
+            Numeric input features.
+        y : array-like of shape (n_samples,)
+            Continuous target variable.
+
+        Returns
+        -------
+        self
+        """
+        if y is None:
+            raise ValueError("Target 'y' must be provided.")
+        y = np.array(y)
+        if not np.issubdtype(y.dtype, np.number):
+            raise TypeError("Target 'y' must be numeric.")
+
+        self._is_dataframe = isinstance(X, pd.DataFrame)
+        X_values = X.values if self._is_dataframe else X
+
+        if np.isnan(X_values).any():
+            raise ValueError("NaN values found in X. Remove or impute them before fitting.")
+
+        # Check all columns are numeric
+        if not np.all([np.issubdtype(dtype, np.number) for dtype in (X.dtypes if self._is_dataframe else X_values.dtype)]):
+            raise TypeError("All features must be numeric continuous.")
+
+        # Compute Pearson correlation and p-value for each feature
+        correlations, p_values = [], []
+        for i in range(X_values.shape[1]):
+            corr, p_val = pearsonr(X_values[:, i], y)
+            correlations.append(abs(corr))  # absolute correlation
+            p_values.append(p_val)
+
+        # Determine threshold based on mode
         if self.mode == "percentile":
-            # Calcola il percentile della correlazione
             threshold = np.percentile(correlations, self.threshold_value * 100)
-        elif self.mode == "absolute":
-            # Usa una soglia assoluta
+        else:
             threshold = self.threshold_value
 
         self.threshold_ = threshold
-        
-        # Seleziona le feature che hanno una correlazione maggiore della soglia e un p-value significativo
+
+        # Select features above threshold and with significant p-value
         self.selected_features_ = [
-            i for i, (score, p_val) in enumerate(zip(correlations, p_values)) 
-            if score >= threshold and p_val <= self.p_value_threshold
+            i for i, (corr, p_val) in enumerate(zip(correlations, p_values))
+            if corr >= threshold and p_val <= self.p_value_threshold
         ]
-        
-        # Salva i nomi originali delle feature se l'input è un DataFrame
-        if self._is_dataframe:
-            self.input_features_ = X.columns
-        else:
-            self.input_features_ = [f"x{i}" for i in range(X.shape[1])]
-        
+
+        # Save original feature names if DataFrame
+        self.input_features_ = X.columns if self._is_dataframe else [f"x{i}" for i in range(X_values.shape[1])]
+
         return self
 
     def transform(self, X):
         """
-        Restituisce le feature selezionate in base alla correlazione e al p-value.
-        
-        :param X: DataFrame o array numpy contenente le feature.
-        :return: Le feature selezionate in base alla correlazione con il target.
+        Transform X to keep only selected features.
+
+        Parameters
+        ----------
+        X : {DataFrame, ndarray}
+
+        Returns
+        -------
+        X_reduced : {DataFrame, ndarray}
         """
-        # Converte X in un array NumPy se è un DataFrame
         X_values = X.values if isinstance(X, pd.DataFrame) else X
-        
-        # Seleziona solo le colonne delle feature che sono state selezionate
         transformed = X_values[:, self.selected_features_]
-        
-        # Restituisce il formato di output richiesto (pandas o NumPy)
+
         if self._is_dataframe:
-            selected_names = self.get_feature_names_out(self.input_features_)
-            return pd.DataFrame(transformed, columns=selected_names, index=getattr(X, 'index', None))
+            feature_names = self.get_feature_names_out()
+            return pd.DataFrame(transformed, columns=feature_names, index=getattr(X, 'index', None))
         return transformed
-    
+
     def fit_transform(self, X, y):
-        """
-        Applica il metodo fit e poi trasforma i dati in un solo passaggio.
-        
-        :param X: DataFrame o array numpy contenente le feature.
-        :param y: Target numerico continuo.
-        :return: Le feature selezionate in base alla correlazione con il target.
-        """
+        """Fit and transform in a single step."""
         return self.fit(X, y).transform(X)
 
     def get_feature_names_out(self, input_features=None):
-        """
-        Restituisce i nomi delle feature selezionate.
-        
-        :param input_features: Lista/array dei nomi originali delle feature.
-        :return: Nomi delle feature selezionate.
-        """
-        # Se non vengono forniti i nomi delle feature, usa quelli memorizzati durante il fitting
+        """Return names of selected features."""
         if input_features is None:
             input_features = getattr(self, 'input_features_', None)
             if input_features is None:
-                raise ValueError("fit deve essere chiamato prima di get_feature_names_out oppure specifica input_features.")
-        
-        # Restituisce i nomi delle feature selezionate
+                raise ValueError("fit must be called before get_feature_names_out or provide input_features.")
         return np.array(input_features)[self.selected_features_]
