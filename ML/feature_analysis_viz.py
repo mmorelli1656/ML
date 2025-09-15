@@ -66,7 +66,7 @@ def variance_histogram(X, bins=20, percentile=None, save_path=None):
             linewidth=2,
             label=f'{percentile}th percentile = {perc_value:.4f}'
         )
-        plt.legend(fontsize=12)
+        plt.legend(fontsize=12, loc='upper right')
 
     # Add title and labels
     plt.title('Distribution of feature variances', fontsize=16)
@@ -144,7 +144,7 @@ def correlation_histogram(X, bins='auto', threshold=None, method='pearson', save
             linewidth=2,
             label=f'Threshold = {threshold:.2f}'
         )
-        plt.legend(fontsize=12)
+        plt.legend(fontsize=12, loc='upper right')
 
     # Add labels and grid
     plt.title('Distribution of Feature Correlations', fontsize=16)
@@ -229,7 +229,7 @@ def eta_squared_histogram(X, y, bins='auto', threshold=None, save_path=None):
             linewidth=2,
             label=f'Threshold = {threshold:.2f}'
         )
-        plt.legend(fontsize=12)
+        plt.legend(fontsize=12, loc='upper right')
 
     # Add labels, title, and grid
     plt.title('Distribution of Eta Squared (η²) Values', fontsize=16)
