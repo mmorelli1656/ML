@@ -281,7 +281,7 @@ def create_labels_and_dataset(prominences):
     """
     labels = pd.Series(
         [1 if "+Ag" in patient else 0 for patient in prominences.index],
-        name="Truth",
+        name="Label",
         index=prominences.index
     )
 
