@@ -13,15 +13,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-import xgboost as xgb
-# from sklearn.linear_model import LogisticRegression
 from joblib import cpu_count
 from pathlib import Path
-    
+
+# Models
+import xgboost as xgb
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+
 # Imports from project subtrees
+# Utilities
 from Utils.project_paths import ProjectPaths
 from Utils.elapsed_timer import Timer
-
+# Machine learning
 from ML.my_featsel import FeaturesVariance, FeaturesPearson
 from ML.my_parallel_ML import ParallelModelTrainer
 from ML.my_eval import EvaluationMetrics
