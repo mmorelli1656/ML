@@ -160,7 +160,7 @@ class ParallelModelTrainer:
         X_train, y_train = self._apply_balancer(X_train, y_train, selected_features)
 
         # Apply scaling
-        X_train_scaled, X_val_scaled, scaler = self._apply_scaler(X_train, X_val)
+        X_train_scaled, X_val_scaled, scaler = self._apply_scaler(X_train, y_train, X_val)
 
         # Train model
         model = self._train_model(X_train_scaled, y_train, X_val_scaled, y_val)
