@@ -416,18 +416,35 @@ class TargetEtaSquared(BaseEstimator, TransformerMixin):
         """
         Compute eta squared (η²) for a single feature and categorical target.
 
+        Eta squared (η²) is a measure of the strength of association between a numeric feature
+        and a categorical target. It represents the proportion of the total variance in the
+        feature that is explained by the differences between the target groups.
+
+        Mathematically, it is defined as:
+
+            η² = SS_between / SS_total
+
+        where:
+        - SS_between is the sum of squares between groups (variation explained by the target),
+        - SS_total is the total sum of squares (total variation in the feature).
+
+        Eta squared values range from 0 to 1:
+        - 0 indicates no association between the feature and the target,
+        - 1 indicates that the feature's variance is fully explained by the target categories.
+
         Parameters
         ----------
         categories : array-like
-            Categorical target labels.
+            Categorical target labels for each sample.
         values : array-like
-            Numeric feature values.
+            Numeric feature values corresponding to each sample.
 
         Returns
         -------
         float
-            Eta squared (η²) value, between 0 and 1.
+            Eta squared (η²) value, ranging from 0 to 1, indicating the strength of association.
         """
+
         categories = np.array(categories)
         values = np.array(values)
         overall_mean = np.mean(values)
