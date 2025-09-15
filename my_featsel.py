@@ -200,15 +200,37 @@ class FeaturesVariance(BaseEstimator, TransformerMixin):
         return np.array(input_features)[self.selected_features_]
 
 
+# ==============================================================
+# Pearson correlation feature selection (numerical continuos)
+# ==============================================================
 class FeaturesPearson(BaseEstimator, TransformerMixin):
-    def __init__(self, threshold=0.9, alpha=0.05, random_state=None):
-        """
-        Inizializza il selettore di feature basato sulla correlazione di Pearson.
+    """
+    Feature selector based on Pearson correlation.
 
-        :param threshold: Soglia di correlazione oltre la quale si eliminano le feature.
-        :param alpha: Livello di significatività per il p-value della correlazione.
-        :param random_state: Seed per la generazione casuale, garantisce riproducibilità.
-        """
+    Removes highly correlated features among numerical continuous columns.
+    If two features are highly correlated and the correlation is statistically
+    significant, the feature with lower variance is removed.
+
+    Parameters
+    ----------
+    threshold : float, default=0.9
+        Correlation threshold above which one of the two features is removed.
+    alpha : float, default=0.05
+        Significance level for the p-value of the correlation.
+    random_state : int or None, default=None
+        Seed for reproducibility (used if tie-breaking randomly; normally deterministic).
+
+    Attributes
+    ----------
+    selected_features_mask_ : ndarray of bool
+        Boolean mask indicating which features are selected.
+    input_features_ : ndarray of str
+        Names of the input features.
+    _output_format : str
+        Output format, either 'default' (NumPy array) or 'pandas' (DataFrame).
+    """
+
+    def __init__(self, threshold=0.9, alpha=0.05, random_state=None):
         self.threshold = threshold
         self.alpha = alpha
         self.random_state = random_state
@@ -216,40 +238,93 @@ class FeaturesPearson(BaseEstimator, TransformerMixin):
         self._output_format = 'default'
 
     def set_output(self, *, transform=None):
+        """Set the output format for transform: 'default' (NumPy) or 'pandas' DataFrame."""
         if transform not in [None, 'default', 'pandas']:
-            raise ValueError(f"transform deve essere 'default', 'pandas' o None. Valore fornito: {transform}")
+            raise ValueError(f"transform must be 'default', 'pandas' or None. Got: {transform}")
         self._output_format = 'default' if transform is None else transform
         return self
 
     def fit(self, X, y=None):
-        self._is_dataframe = isinstance(X, pd.DataFrame)
-        X_df = X.copy() if self._is_dataframe else pd.DataFrame(X)
+        """
+        Fit the feature selector on the input data.
 
-        self.input_features_ = X_df.columns if self._is_dataframe else [f"x{i}" for i in range(X_df.shape[1])]
+        Parameters
+        ----------
+        X : {DataFrame, ndarray} of shape (n_samples, n_features)
+            Input data to analyze.
+        y : Ignored
+            Not used, present for API consistency.
+
+        Returns
+        -------
+        self : object
+        """
+        # Convert to DataFrame for convenience
+        if isinstance(X, pd.DataFrame):
+            X_df = X.copy()
+            self._is_dataframe = True
+        else:
+            X_df = pd.DataFrame(X)
+            self._is_dataframe = False
+
+        # Check that all columns are numeric
+        if not np.all([np.issubdtype(dtype, np.number) for dtype in X_df.dtypes]):
+            raise TypeError("All columns must be numeric continuous. Non-numeric columns found.")
+
+        self.input_features_ = np.array(X_df.columns)
+
+        # Min-Max scale features (mandatory)
+        scaler = MinMaxScaler()
+        X_scaled = pd.DataFrame(scaler.fit_transform(X_df), columns=X_df.columns)
+
+        # Compute variance for deterministic removal
+        variances = X_scaled.var()
+
+        # Initialize mask for selected features
         n_features = X_df.shape[1]
-        to_remove = set()
+        selected_mask = np.ones(n_features, dtype=bool)
 
+        # Compute correlation matrix (absolute values)
         corr_matrix = X_df.corr().abs()
         upper_tri_indices = np.triu_indices(n_features, k=1)
 
+        # Loop over feature pairs
         for i, j in zip(*upper_tri_indices):
-            if i in to_remove or j in to_remove:
+            if not selected_mask[i] or not selected_mask[j]:
+                # Skip if either feature is already removed
                 continue
 
             r = corr_matrix.iat[i, j]
+
             if r > self.threshold:
                 _, p_value = pearsonr(X_df.iloc[:, i], X_df.iloc[:, j])
                 if p_value < self.alpha:
-                    remove_idx = self._rng.choice([i, j])
-                    to_remove.add(remove_idx)
+                    # Remove feature with lower variance
+                    if variances[i] < variances[j]:
+                        selected_mask[i] = False
+                    elif variances[j] < variances[i]:
+                        selected_mask[j] = False
+                    else:
+                        # If equal, remove randomly
+                        remove_idx = self._rng.choice([i, j])
+                        selected_mask[remove_idx] = False
 
-        self.selected_features_mask_ = np.array([
-            False if i in to_remove else True for i in range(n_features)
-        ])
+        self.selected_features_mask_ = selected_mask
         return self
 
     def transform(self, X):
-        if isinstance(X, pd.DataFrame):
+        """
+        Reduce X to the selected features.
+
+        Parameters
+        ----------
+        X : {DataFrame, ndarray} of shape (n_samples, n_features)
+
+        Returns
+        -------
+        X_reduced : {ndarray, DataFrame}
+        """
+        if self._is_dataframe:
             transformed = X.loc[:, self.selected_features_mask_]
         else:
             transformed = X[:, self.selected_features_mask_]
@@ -270,8 +345,9 @@ class FeaturesPearson(BaseEstimator, TransformerMixin):
         if input_features is None:
             input_features = getattr(self, 'input_features_', None)
             if input_features is None:
-                raise ValueError("fit deve essere chiamato prima di get_feature_names_out oppure specifica input_features.")
+                raise ValueError("fit must be called before get_feature_names_out or provide input_features.")
         return np.array(input_features)[self.selected_features_mask_]
+
 
 
 class TargetEtaSquared(BaseEstimator, TransformerMixin):
