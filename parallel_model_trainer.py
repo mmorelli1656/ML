@@ -204,37 +204,41 @@ class ParallelModelTrainer:
         Also prints the average number of selected features across folds
         with its standard deviation.
         """
-        # Get number of repeats (if available)
+        # Numero di ripetizioni e fold
         n_repeats = getattr(self.rkf, "n_repeats", 1)
         n_folds = int(self.rkf.get_n_splits(self.X, self.y) / n_repeats)
     
-        # Create row names like Iter_1_Fold_1, Iter_1_Fold_2, ...
+        # Nomi leggibili per i fold
         row_names = [
             f"Iter_{r}_Fold_{f}"
             for r in range(1, n_repeats + 1)
             for f in range(1, n_folds + 1)
         ]
     
-        # Initialize DataFrame with zeros
+        # DataFrame vuoto con indice numerico coerente con result.fold_idx
         df_feature_selection = pd.DataFrame(
-            0, index=row_names, columns=self.X.columns
+            0, index=range(len(results)), columns=self.X.columns
         )
     
-        # Fill with 1 if feature selected in the fold
+        # Riempimento: 1 se la feature è selezionata
         for result in results:
             df_feature_selection.loc[result.fold_idx, result.selected_features] = 1
     
-        # Count how many features were selected per fold
+        # Sostituisci l’indice numerico con i nomi leggibili
+        df_feature_selection.index = row_names
+    
+        # Statistiche
         selected_counts = df_feature_selection.sum(axis=1).values
         mean_selected = selected_counts.mean()
         std_selected = selected_counts.std()
     
         print(
-            f"[INFO] Average number of selected features per fold: "
-            f"{mean_selected:.2f} ± {std_selected:.2f}"
+            f"Media feature selezionate per fold: {mean_selected:.2f} "
+            f"(±{std_selected:.2f})"
         )
     
         return df_feature_selection
+
 
     def get_predictions(self, results: List[FoldResult]) -> pd.DataFrame:
         """Return a DataFrame with fold predictions aligned to the original index."""
