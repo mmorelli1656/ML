@@ -109,26 +109,6 @@ class SHAPHandler:
 
         self.shap_dict_: Optional[Dict[int, pd.DataFrame]] = None
 
-    # def _get_explainer(self, model):
-    #     """
-    #     Return an appropriate SHAP explainer based on the selected type.
-    #     """
-    #     if self.explainer_type == "auto":
-    #         try:
-    #             return shap.TreeExplainer(model)  # Fast for tree models
-    #         except Exception:
-    #             return shap.Explainer(model)      # Generic fallback
-            
-    #     elif self.explainer_type == "tree":
-    #         return shap.TreeExplainer(model)
-        
-    #     elif self.explainer_type == "linear":
-    #         return shap.LinearExplainer(model, self.X)
-    #     elif self.explainer_type == "kernel":
-    #         return shap.KernelExplainer(model.predict, self.X)
-    #     else:
-    #         raise ValueError(f"Explainer type '{self.explainer_type}' is not supported.")
-
     def _get_explainer(self, model, result):
         """
         Return an appropriate SHAP explainer based on the selected type.
@@ -164,7 +144,7 @@ class SHAPHandler:
     def _compute_fold_shap(self, result, n_folds):
         """
         Compute SHAP values for a single fold.
-
+    
         Parameters
         ----------
         result : object
@@ -172,7 +152,7 @@ class SHAPHandler:
             selected features, and optional scaler.
         n_folds : int
             Number of folds per repetition.
-
+    
         Returns
         -------
         repeat_idx : int
@@ -184,32 +164,47 @@ class SHAPHandler:
         # Identify repetition index based on fold index
         repeat_idx = (result.fold_idx // n_folds) + 1
         val_idx = result.val_idx
-
+    
         # Restrict validation data to selected features only
         X_val = self.X.iloc[val_idx][result.selected_features]
-
+    
         # Optionally scale validation data (if scaler is provided in results)
-        if self.use_scaled:
+        if self.use_scaled and result.scaler is not None:
             X_val = result.scaler.transform(X_val)
-
+    
         # Build SHAP explainer for the current model
-        # explainer = self._get_explainer(result.model)
         explainer = self._get_explainer(result.model, result)
-
+    
         # Compute SHAP values for the validation set
         shap_values = explainer(X_val)
-
-        # Create a DataFrame aligned with original dataset:
-        # - rows = validation samples
-        # - columns = all features (non-selected features -> NaN)
+    
+        # --- Robust handling for different SHAP outputs ---
+        if isinstance(shap_values, list):
+            # Old API returns a list of arrays, one per class
+            # For binary classification, take the positive class (index 1)
+            if len(shap_values) == 2:
+                shap_values_2d = shap_values[1]
+            else:
+                shap_values_2d = shap_values[0]  # single class / regression
+        elif isinstance(shap_values.values, np.ndarray):
+            if shap_values.values.ndim == 3:
+                # shape = (n_samples, n_features, n_classes)
+                shap_values_2d = shap_values.values[:, :, 1]  # take positive class
+            else:
+                shap_values_2d = shap_values.values
+        else:
+            raise ValueError("Unsupported SHAP output type.")
+    
+        # Create a DataFrame aligned with original dataset
         df_shap = pd.DataFrame(
             index=self.X.index[val_idx],
             columns=self.X.columns,
             data=pd.NA
         )
-        df_shap[result.selected_features] = shap_values.values
-
+        df_shap[result.selected_features] = shap_values_2d
+    
         return repeat_idx, df_shap
+
 
     def compute_shap_values(self) -> Dict[int, pd.DataFrame]:
         """
