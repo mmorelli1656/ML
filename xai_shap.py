@@ -143,10 +143,13 @@ class SHAPHandler:
             return shap.TreeExplainer(model)
     
         elif self.explainer_type == "linear":
-            # Usa solo le feature selezionate in questo fold
-            background = self.X[result.selected_features]
+            # Training indices
+            train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
+            
+            # Background: only training with selected features
+            background = self.X.iloc[train_idx][result.selected_features]
     
-            # Se serve, applica lo scaler
+            # Apply scaler
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
     
