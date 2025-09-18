@@ -14,6 +14,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 
 
 #%% XAI with SHAP
@@ -285,7 +286,8 @@ class SHAPHandler:
             show=False
         )
         if save_path is not None:
-            plt.savefig(save_path, bbox_inches='tight', dpi=200)
+            file_path = Path(save_path) / "shap_summary.png"
+            plt.savefig(file_path, bbox_inches='tight', dpi=200)
         plt.show()
     
         # Compute mean absolute SHAP values for ranking
