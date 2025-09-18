@@ -242,7 +242,11 @@ class SHAPHandler:
     ):
         """
         Plot an aggregated SHAP summary across all repetitions and folds.
-
+    
+        This method concatenates SHAP values from all repetitions and folds,
+        fills NaNs with 0 (features not selected in some folds), and plots
+        the global summary plot using SHAP.
+    
         Parameters
         ----------
         max_display : int, default=20
@@ -251,24 +255,27 @@ class SHAPHandler:
             Label for the plot title.
         save_path : str, optional
             If provided, saves the plot to the specified path.
-
+    
         Returns
         -------
         top_features : pd.DataFrame
             DataFrame containing the top features ranked by mean absolute SHAP value.
         """
-        if not hasattr(self, 'shap_dict') or not hasattr(self, 'features_dict'):
+        # Ensure SHAP values have been computed
+        if self.shap_dict_ is None:
             raise RuntimeError("You must call compute_shap_values() before plotting!")
-
-        # Concatenate SHAP values and corresponding feature values
-        df_shap_all = pd.concat([self.shap_dict[r] for r in self.shap_dict], axis=0)
-        df_feat_all = pd.concat([self.features_dict[r] for r in self.features_dict], axis=0)
-
-        # Prepare numpy arrays for SHAP plotting
+    
+        # Concatenate all repetitions
+        df_shap_all = pd.concat([self.shap_dict_[r] for r in self.shap_dict_], axis=0)
+    
+        # Use original feature values for plotting
+        df_features_all = self.X.loc[df_shap_all.index, df_shap_all.columns]
+    
+        # Convert NaN to 0 for features not selected in some folds
         shap_values_concatenated = df_shap_all.fillna(0).values
-        features_values = df_feat_all.fillna(0).values
-
-        # SHAP summary plot (global importance visualization)
+        features_values = df_features_all.fillna(0).values
+    
+        # Plot summary
         plt.title(f"{what} SHAP Summary Plot - Global case", fontsize=15, loc='center')
         shap.summary_plot(
             shap_values_concatenated,
@@ -280,10 +287,15 @@ class SHAPHandler:
         if save_path is not None:
             plt.savefig(save_path, bbox_inches='tight', dpi=200)
         plt.show()
-
-        # Compute mean absolute SHAP importance for ranking
+    
+        # Compute mean absolute SHAP values for ranking
         mean_abs_shap = np.mean(np.abs(shap_values_concatenated), axis=0)
-        feature_importance = pd.DataFrame({"MeanAbsSHAP": mean_abs_shap}, index=df_shap_all.columns)
-        top_features = feature_importance.sort_values(by="MeanAbsSHAP", ascending=False).head(max_display)
-
+        feature_importance = pd.DataFrame(
+            {"MeanAbsSHAP": mean_abs_shap},
+            index=df_shap_all.columns
+        )
+        top_features = feature_importance.sort_values(
+            by="MeanAbsSHAP", ascending=False
+        ).head(max_display)
+    
         return top_features
