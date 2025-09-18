@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+from pathlib import Path
 
 
 #%% Feature properties visualization
@@ -79,7 +80,8 @@ def variance_histogram(X, bins=20, percentile=None, save_path=None):
 
     # Save figure if save_path is provided; otherwise, display it
     if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        file_path = Path(save_path) / "variance_hist.png"
+        plt.savefig(file_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -155,7 +157,8 @@ def correlation_histogram(X, bins='auto', threshold=None, method='pearson', save
 
     # Save figure or show
     if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        file_path = Path(save_path) / f"{method}_corr_hist.png"
+        plt.savefig(file_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -240,7 +243,8 @@ def eta_squared_histogram(X, y, bins='auto', threshold=None, save_path=None):
 
     # Save or show figure
     if save_path is not None:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        file_path = Path(save_path) / "eta_squared_hist.png"
+        plt.savefig(file_path, dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
