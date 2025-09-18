@@ -187,7 +187,7 @@ class SHAPHandler:
             else:
                 shap_values_2d = shap_values[0]  # single class / regression
         elif isinstance(shap_values.values, np.ndarray):
-            if shap_values.values.ndim == 3:
+            if shap_values.values.ndim == 3 and shap_values.values.shape[2] == 2:
                 # shape = (n_samples, n_features, n_classes)
                 shap_values_2d = shap_values.values[:, :, 1]  # take positive class
             else:
