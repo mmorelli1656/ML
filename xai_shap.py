@@ -146,9 +146,9 @@ class SHAPHandler:
             # Usa solo le feature selezionate in questo fold
             background = self.X[result.selected_features]
     
-            # Se serve, applica lo scaler
-            if self.use_scaled and result.scaler is not None:
-                background = result.scaler.transform(background)
+            # # Se serve, applica lo scaler
+            # if self.use_scaled and result.scaler is not None:
+            #     background = result.scaler.transform(background)
     
             return shap.LinearExplainer(model, background)
     
