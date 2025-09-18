@@ -109,21 +109,52 @@ class SHAPHandler:
 
         self.shap_dict_: Optional[Dict[int, pd.DataFrame]] = None
 
-    def _get_explainer(self, model):
+    # def _get_explainer(self, model):
+    #     """
+    #     Return an appropriate SHAP explainer based on the selected type.
+    #     """
+    #     if self.explainer_type == "auto":
+    #         try:
+    #             return shap.TreeExplainer(model)  # Fast for tree models
+    #         except Exception:
+    #             return shap.Explainer(model)      # Generic fallback
+            
+    #     elif self.explainer_type == "tree":
+    #         return shap.TreeExplainer(model)
+        
+    #     elif self.explainer_type == "linear":
+    #         return shap.LinearExplainer(model, self.X)
+    #     elif self.explainer_type == "kernel":
+    #         return shap.KernelExplainer(model.predict, self.X)
+    #     else:
+    #         raise ValueError(f"Explainer type '{self.explainer_type}' is not supported.")
+
+    def _get_explainer(self, model, result):
         """
         Return an appropriate SHAP explainer based on the selected type.
         """
         if self.explainer_type == "auto":
             try:
-                return shap.TreeExplainer(model)  # Fast for tree models
+                return shap.TreeExplainer(model)
             except Exception:
-                return shap.Explainer(model)      # Generic fallback
+                return shap.Explainer(model)
+    
         elif self.explainer_type == "tree":
             return shap.TreeExplainer(model)
+    
         elif self.explainer_type == "linear":
-            return shap.LinearExplainer(model, self.X)
+            # Usa solo le feature selezionate in questo fold
+            background = self.X[result.selected_features]
+    
+            # Se serve, applica lo scaler
+            if self.use_scaled and result.scaler is not None:
+                background = result.scaler.transform(background)
+    
+            return shap.LinearExplainer(model, background)
+    
         elif self.explainer_type == "kernel":
-            return shap.KernelExplainer(model.predict, self.X)
+            return shap.KernelExplainer(model.predict, self.X[result.selected_features])
+    
         else:
             raise ValueError(f"Explainer type '{self.explainer_type}' is not supported.")
 
@@ -159,7 +190,8 @@ class SHAPHandler:
             X_val = result.scaler.transform(X_val)
 
         # Build SHAP explainer for the current model
-        explainer = self._get_explainer(result.model)
+        # explainer = self._get_explainer(result.model)
+        explainer = self._get_explainer(result.model, result)
 
         # Compute SHAP values for the validation set
         shap_values = explainer(X_val)
