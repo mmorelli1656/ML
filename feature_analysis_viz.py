@@ -70,7 +70,7 @@ def variance_histogram(X, bins=20, percentile=None, save_path=None):
         plt.legend(fontsize=12, loc='upper right')
 
     # Add title and labels
-    plt.title('Distribution of feature variances', fontsize=16)
+    plt.title('Distribution of Feature Variances', fontsize=16)
     plt.xlabel('Variance', fontsize=14)
     plt.ylabel('Number of features', fontsize=14)
 
