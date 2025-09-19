@@ -130,22 +130,7 @@ class SHAPHandler:
             
             return shap.LinearExplainer(
                 result.model,
-                background,
-                link=shap.links.probability)
-        
-            # try:
-            #     return shap.LinearExplainer(
-            #         result.model,
-            #         background,
-            #         link=shap.links.identity  # più robusto
-            #     )
-            # except TypeError:
-            #     # fallback per versioni che accettano solo stringhe
-            #     return shap.LinearExplainer(
-            #         result.model,
-            #         background,
-            #         link="identity"
-            #     )
+                background)
         
         elif self.explainer_type == "kernel":
             train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
