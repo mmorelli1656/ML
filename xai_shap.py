@@ -124,10 +124,9 @@ class SHAPHandler:
     
         elif self.explainer_type == "linear":
             train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
-            background = self.X.iloc[train_idx][result.selected_features].to_numpy()
+            background = self.X.iloc[train_idx][result.selected_features]
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
-                print("scaled!")
         
             try:
                 return shap.LinearExplainer(
