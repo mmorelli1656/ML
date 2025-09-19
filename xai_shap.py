@@ -131,7 +131,7 @@ class SHAPHandler:
             return shap.LinearExplainer(
                 result.model,
                 background,
-                link=shap.links.identity)
+                link=shap.links.probability)
         
             # try:
             #     return shap.LinearExplainer(
