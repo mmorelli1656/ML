@@ -130,14 +130,14 @@ class SHAPHandler:
         
             try:
                 return shap.LinearExplainer(
-                    model,
+                    result.model,
                     background,
                     link=shap.links.identity  # più robusto
                 )
             except TypeError:
                 # fallback per versioni che accettano solo stringhe
                 return shap.LinearExplainer(
-                    model,
+                    result.model,
                     background,
                     link="identity"
                 )
