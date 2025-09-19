@@ -128,11 +128,19 @@ class SHAPHandler:
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
         
-            return shap.LinearExplainer(
-                result.model,
-                background,
-                link="identity"  # <--- per avere valori in probabilità
-            )
+            try:
+                return shap.LinearExplainer(
+                    model,
+                    background,
+                    link=shap.links.identity  # più robusto
+                )
+            except TypeError:
+                # fallback per versioni che accettano solo stringhe
+                return shap.LinearExplainer(
+                    model,
+                    background,
+                    link="identity"
+                )
         
         elif self.explainer_type == "kernel":
             train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
