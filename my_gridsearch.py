@@ -14,7 +14,6 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
-import time
 from xgboost import XGBClassifier, XGBRegressor
 
 
@@ -120,17 +119,11 @@ class ParallelGridSearch:
 
     def parallel_training(self):
         n_splits = self.rskf.get_n_splits(self.X, self.y)
-        start_time = time.time()
 
         all_results = Parallel(n_jobs=self.n_cores, backend="loky")(
             delayed(self.process_fold)(fold_idx, train_idx, val_idx)
             for fold_idx, (train_idx, val_idx) in tqdm(enumerate(self.rskf.split(self.X, self.y)), total=n_splits)
         )
-
-        elapsed_time = time.time() - start_time
-        h, m = divmod(elapsed_time // 60, 60)
-        s = elapsed_time % 60
-        print(f"Training time: {int(h)} h, {int(m)} min, {s:.2f} sec")
 
         # Appiattisce la lista di liste
         return [item for sublist in all_results for item in sublist]
@@ -148,7 +141,6 @@ class ParallelGridSearch:
         """
         metric_scores = defaultdict(list)  # Dizionario per raccogliere i punteggi per ogni combinazione di parametri
     
-        start_time = time.time()
         # Itera su ciascun risultato dei fold (risultati della cross-validation)
         for res in results:
             y_true = self.y[res.val_idx]  # Etichette vere per la validazione
@@ -189,11 +181,6 @@ class ParallelGridSearch:
     
         # Ordina i risultati in base alla media del punteggio (decrescente) e resetta l'indice
         df_summary = df_summary.sort_values(by='mean_score', ascending=False).reset_index(drop=True)
-        
-        elapsed_time = time.time() - start_time
-        h, m = divmod(elapsed_time // 60, 60)
-        s = elapsed_time % 60
-        print(f"Aggregation time: {int(h)} h, {int(m)} min, {s:.2f} sec")
     
         return df_summary
 
@@ -216,9 +203,7 @@ class ParallelGridSearch:
     
             param_tuple = tuple(sorted(res.param_combination.items()))
             return (param_tuple, score)
-    
-        start_time = time.time()
-    
+        
         # Parallelizza l'elaborazione dei risultati
         processed = Parallel(n_jobs=n_jobs)(
             delayed(process_result)(res) for res in tqdm(results)
@@ -244,11 +229,6 @@ class ParallelGridSearch:
     
         df_summary = pd.DataFrame(summary)
         df_summary = df_summary.sort_values(by='mean_score', ascending=False).reset_index(drop=True)
-    
-        elapsed_time = time.time() - start_time
-        h, m = divmod(elapsed_time // 60, 60)
-        s = elapsed_time % 60
-        print(f"Aggregation time: {int(h)} h, {int(m)} min, {s:.2f} sec")
     
         return df_summary
 
