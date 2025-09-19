@@ -130,14 +130,14 @@ class SHAPHandler:
         
             try:
                 return shap.LinearExplainer(
-                    result.model,
+                    model.predict_proba,
                     background,
                     link=shap.links.identity  # più robusto
                 )
             except TypeError:
                 # fallback per versioni che accettano solo stringhe
                 return shap.LinearExplainer(
-                    result.model,
+                    model.predict_proba,
                     background,
                     link="identity"
                 )
@@ -149,7 +149,7 @@ class SHAPHandler:
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
             return shap.KernelExplainer(
-                result.model.predict_proba,  # <--- usa proba, non predict
+                model.predict_proba,  # <--- usa proba, non predict
                 background
             )
 
