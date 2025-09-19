@@ -193,7 +193,7 @@ class SHAPHandler:
             X_val = result.scaler.transform(X_val)
     
         # Build SHAP explainer for the current model
-        explainer = self._get_explainer(result.model, result)
+        explainer = self._get_explainer(result)
     
         # Compute SHAP values for the validation set
         shap_values = explainer(X_val)
