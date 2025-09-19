@@ -210,7 +210,6 @@ class SHAPHandler:
     
         return repeat_idx, df_shap
 
-
     def compute_shap_values(self) -> Dict[int, pd.DataFrame]:
         """
         Compute SHAP values for all folds and aggregate them by repetition.
