@@ -109,38 +109,43 @@ class SHAPHandler:
 
         self.shap_dict_: Optional[Dict[int, pd.DataFrame]] = None
 
-    def _get_explainer(self, model, result):
+    def _get_explainer(self, result):
         """
         Return an appropriate SHAP explainer based on the selected type.
         """
         if self.explainer_type == "auto":
             try:
-                return shap.TreeExplainer(model)
+                return shap.TreeExplainer(result.model)
             except Exception:
-                return shap.Explainer(model)
+                return shap.Explainer(result.model)
     
         elif self.explainer_type == "tree":
-            return shap.TreeExplainer(model)
+            return shap.TreeExplainer(result.model)
     
         elif self.explainer_type == "linear":
             train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
             background = self.X.iloc[train_idx][result.selected_features]
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
+            
+            return shap.LinearExplainer(
+                result.model,
+                background,
+                link=shap.links.identity)
         
-            try:
-                return shap.LinearExplainer(
-                    model.predict_proba,
-                    background,
-                    link=shap.links.identity  # più robusto
-                )
-            except TypeError:
-                # fallback per versioni che accettano solo stringhe
-                return shap.LinearExplainer(
-                    model.predict_proba,
-                    background,
-                    link="identity"
-                )
+            # try:
+            #     return shap.LinearExplainer(
+            #         result.model,
+            #         background,
+            #         link=shap.links.identity  # più robusto
+            #     )
+            # except TypeError:
+            #     # fallback per versioni che accettano solo stringhe
+            #     return shap.LinearExplainer(
+            #         result.model,
+            #         background,
+            #         link="identity"
+            #     )
         
         elif self.explainer_type == "kernel":
             train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
@@ -149,7 +154,7 @@ class SHAPHandler:
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
             return shap.KernelExplainer(
-                model.predict_proba,  # <--- usa proba, non predict
+                result.model.predict_proba,
                 background
             )
 
