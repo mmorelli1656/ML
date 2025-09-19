@@ -123,21 +123,28 @@ class SHAPHandler:
             return shap.TreeExplainer(model)
     
         elif self.explainer_type == "linear":
-            # Training indices
             train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
-            
-            # Background: only training with selected features
             background = self.X.iloc[train_idx][result.selected_features]
-    
-            # Apply scaler
             if self.use_scaled and result.scaler is not None:
                 background = result.scaler.transform(background)
-    
-            return shap.LinearExplainer(model, background)
-    
+        
+            return shap.LinearExplainer(
+                result.model,
+                background,
+                link="identity"  # <--- per avere valori in probabilità
+            )
+        
         elif self.explainer_type == "kernel":
-            return shap.KernelExplainer(model.predict, self.X[result.selected_features])
-    
+            train_idx = np.setdiff1d(np.arange(len(self.X)), result.val_idx)
+            background = self.X.iloc[train_idx][result.selected_features]
+            
+            if self.use_scaled and result.scaler is not None:
+                background = result.scaler.transform(background)
+            return shap.KernelExplainer(
+                result.model.predict_proba,  # <--- usa proba, non predict
+                background
+            )
+
         else:
             raise ValueError(f"Explainer type '{self.explainer_type}' is not supported.")
 
@@ -268,7 +275,6 @@ class SHAPHandler:
     def plot_summary_aggregated(
         self,
         max_display: int = 20,
-        what: str = "Target",
         save_path: Optional[str] = None
     ):
         """
@@ -307,7 +313,7 @@ class SHAPHandler:
         features_values = df_features_all.fillna(0).values
     
         # Plot summary
-        plt.title(f"{what} SHAP Summary Plot - Global case", fontsize=15, loc='center')
+        plt.title("SHAP Summary Plot - Global case", fontsize=15, loc='center')
         shap.summary_plot(
             shap_values_concatenated,
             features_values,
