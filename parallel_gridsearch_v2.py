@@ -281,7 +281,7 @@ class ParallelGridSearch:
             y_pred, y_pred_proba = res.y_pred, res.y_pred_proba
     
             for name, fn in metrics.items():
-                if use_proba:
+                if use_proba and name=="auc":
                     if y_pred_proba is None:
                         continue
                     score = fn(y_true, y_pred_proba)
