@@ -46,16 +46,16 @@ class ParallelGridSearch:
         X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
         y_train, y_val = self.y[train_idx], self.y[val_idx]
         
+        for selector in self.feature_selectors:
+            selector.set_output(transform='pandas')
+            X_train = selector.fit_transform(X_train, y_train)
+            X_val = selector.transform(X_val)
+        
         if self.balancer:
             balancer = clone(self.balancer)
             X_train, y_train = balancer.fit_resample(X_train, y_train)
             if not isinstance(X_train, pd.DataFrame):
                 X_train = pd.DataFrame(X_train, columns=self.X.columns)
-        
-        for selector in self.feature_selectors:
-            selector.set_output(transform='pandas')
-            X_train = selector.fit_transform(X_train, y_train)
-            X_val = selector.transform(X_val)
         
         selected_features = X_train.columns
         scaler = clone(self.scaler)
