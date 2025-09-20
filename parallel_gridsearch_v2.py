@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ParallelGridSearch - optimized for repeated cross-validation with parallel execution and grid search.
-Author: mik16
+Author: mik16 (refactored with preprocessing cache, multi-metric aggregation, and modular design)
 """
 
 #%% Libraries
@@ -23,7 +23,7 @@ class ParallelGridSearch:
     """
     A utility class for parallelized repeated cross-validation combined with
     hyperparameter grid search. It supports optional feature selection,
-    balancing, scaling, and model training.
+    balancing, scaling, and model training with preprocessing cached per fold.
 
     Parameters
     ----------
@@ -132,7 +132,35 @@ class ParallelGridSearch:
         return X_train_scaled, X_val_scaled, scaler
 
     # ------------------------------------------------------------------
-    # Training fold-wise
+    # Preprocessing cache
+    # ------------------------------------------------------------------
+    def _preprocess_fold(self, fold_idx: int, train_idx, val_idx) -> dict:
+        """Perform feature selection, balancing, and scaling ONCE per fold."""
+        X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
+        y_train, y_val = self.y.iloc[train_idx], self.y.iloc[val_idx]
+
+        # Feature selection
+        X_train, X_val, selected_features = self._apply_feature_selection(X_train, y_train, X_val)
+
+        # Balancing
+        X_train, y_train = self._apply_balancer(X_train, y_train, selected_features)
+
+        # Scaling
+        X_train_scaled, X_val_scaled, scaler = self._apply_scaler(X_train, y_train, X_val)
+
+        return {
+            "fold_idx": fold_idx,
+            "val_idx": val_idx,
+            "X_train_scaled": X_train_scaled,
+            "X_val_scaled": X_val_scaled,
+            "y_train": y_train,
+            "y_val": y_val,
+            "selected_features": selected_features,
+            "scaler": scaler,
+        }
+
+    # ------------------------------------------------------------------
+    # Training
     # ------------------------------------------------------------------
     def _train_model(
         self, param_comb: Dict, X_train_scaled: np.ndarray, y_train: np.ndarray,
@@ -147,9 +175,6 @@ class ParallelGridSearch:
             model.fit(X_train_scaled, y_train)
         return model
 
-    # ------------------------------------------------------------------
-    # Predictions fold-wise
-    # ------------------------------------------------------------------
     def _get_fold_predictions(
         self, model, X_val_scaled: np.ndarray, y_val: np.ndarray
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
@@ -164,55 +189,35 @@ class ParallelGridSearch:
                 y_pred_proba = proba[:, self.classes_to_save]
         return y_pred, y_pred_proba
 
-    # ------------------------------------------------------------------
-    # Process a single fold
-    # ------------------------------------------------------------------
-    def process_fold(
-        self, fold_idx: int, train_idx: np.ndarray, val_idx: np.ndarray,
-        param_comb: Optional[Dict] = None
-    ) -> List[FoldResult]:
-        """Run preprocessing, training, and prediction for one fold."""
-        X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
-        y_train, y_val = self.y.iloc[train_idx], self.y.iloc[val_idx]
+    def _train_on_preprocessed(self, preprocessed: dict, param_comb: dict):
+        """Train a model using preprocessed fold data and a parameter combination."""
+        model = self._train_model(
+            param_comb,
+            preprocessed["X_train_scaled"], preprocessed["y_train"],
+            preprocessed["X_val_scaled"], preprocessed["y_val"]
+        )
 
-        # Apply feature selection
-        X_train, X_val, selected_features = self._apply_feature_selection(X_train, y_train, X_val)
+        # Predictions
+        y_pred, y_pred_proba = self._get_fold_predictions(
+            model, preprocessed["X_val_scaled"], preprocessed["y_val"]
+        )
 
-        # Apply balancing
-        X_train, y_train = self._apply_balancer(X_train, y_train, selected_features)
-
-        # Apply scaling
-        X_train_scaled, X_val_scaled, scaler = self._apply_scaler(X_train, y_train, X_val)
-
-        results = []
-        param_combinations = [param_comb] if param_comb is not None else self.param_grid
-
-        for param in param_combinations:
-            # Train model
-            model = self._train_model(param, X_train_scaled, y_train, X_val_scaled, y_val)
-
-            # Predictions
-            y_pred, y_pred_proba = self._get_fold_predictions(model, X_val_scaled, y_val)
-
-            results.append(
-                self.FoldResult(
-                    fold_idx,
-                    val_idx,
-                    selected_features,
-                    scaler,
-                    param,
-                    model if self.save_models else None,
-                    y_pred,
-                    y_pred_proba,
-                )
-            )
-        return results
+        return self.FoldResult(
+            fold_idx=preprocessed["fold_idx"],
+            val_idx=preprocessed["val_idx"],
+            selected_features=preprocessed["selected_features"],
+            scaler=preprocessed["scaler"],
+            param_combination=param_comb,
+            model=model if self.save_models else None,
+            y_pred=y_pred,
+            y_pred_proba=y_pred_proba,
+        )
 
     # ------------------------------------------------------------------
     # Parallel training
     # ------------------------------------------------------------------
     def parallel_training(self) -> List[FoldResult]:
-        """Run all folds and parameter combinations in parallel."""
+        """Run folds and parameters in parallel with preprocessing cache."""
         max_cores = cpu_count()
         print(f"[INFO] Maximum available cores: {max_cores}")
 
@@ -224,37 +229,39 @@ class ParallelGridSearch:
 
         n_splits = self.rskf.get_n_splits(self.X, self.y)
 
+        # STEP 1: preprocess folds once
+        print("[INFO] Preprocessing folds...")
+        preprocessed_folds = [
+            self._preprocess_fold(fold_idx, train_idx, val_idx)
+            for fold_idx, (train_idx, val_idx) in tqdm(
+                enumerate(self.rskf.split(self.X, self.y)), total=n_splits
+            )
+        ]
+
+        # STEP 2: parallel training
         if self.parallel_over == "fold":
-            # Parallelize over folds
+            print("[INFO] Training parallelized over folds...")
             all_results = Parallel(n_jobs=self.n_cores, backend="loky")(
-                delayed(self.process_fold)(fold_idx, train_idx, val_idx)
-                for fold_idx, (train_idx, val_idx) in tqdm(
-                    enumerate(self.rskf.split(self.X, self.y)), total=n_splits
-                )
+                delayed(self._train_on_preprocessed)(preprocessed, param_comb)
+                for preprocessed in preprocessed_folds
+                for param_comb in self.param_grid
             )
         else:  # parallel_over == "param"
-            # Parallelize over parameter combinations
+            print("[INFO] Training parallelized over parameters...")
             all_results = Parallel(n_jobs=self.n_cores, backend="loky")(
-                delayed(self._process_param_comb)(param)
-                for param in tqdm(self.param_grid)
+                delayed(self._train_on_preprocessed)(preprocessed, param_comb)
+                for param_comb in self.param_grid
+                for preprocessed in preprocessed_folds
             )
 
-        # Flatten list of lists
-        return [item for sublist in all_results for item in sublist]
-
-    def _process_param_comb(self, param_comb: Dict) -> List[FoldResult]:
-        """Process all folds for a single parameter combination."""
-        results = []
-        for fold_idx, (train_idx, val_idx) in enumerate(self.rskf.split(self.X, self.y)):
-            results.extend(self.process_fold(fold_idx, train_idx, val_idx, param_comb=param_comb))
-        return results
+        return all_results
 
     # ------------------------------------------------------------------
-    # Aggregation utilities
+    # Aggregation
     # ------------------------------------------------------------------
     def aggregate_results(
         self,
-        results: List["ParallelGridSearch.FoldResult"],
+        results: List[FoldResult],
         metric_fn: Union[Callable, Dict[str, Callable]],
         use_proba: bool = False,
         show_progress: bool = True,
@@ -262,24 +269,37 @@ class ParallelGridSearch:
         """
         Aggregate results by computing mean and std of one or multiple metrics
         for each parameter set.
-        ...
+
+        Parameters
+        ----------
+        results : List[FoldResult]
+            Results from parallel_training.
+        metric_fn : callable or dict[str, callable]
+            - Single metric function (e.g., recall_score, roc_auc_score), or
+            - Dict of {metric_name: function}.
+        use_proba : bool, default=False
+            If True, use predicted probabilities instead of labels.
         show_progress : bool, default=True
-            If True, display a tqdm progress bar while iterating over results.
+            If True, display a tqdm progress bar.
+
+        Returns
+        -------
+        df_summary : pd.DataFrame
+            Summary DataFrame with mean and std for each metric,
+            sorted by the first metric.
         """
-        # Ensure we always work with a dict
         if callable(metric_fn):
             metrics = {"score": metric_fn}
         else:
             metrics = metric_fn
-    
+
         metric_scores = defaultdict(lambda: defaultdict(list))
-    
         iterator = tqdm(results, desc="Aggregating results") if show_progress else results
-    
+
         for res in iterator:
             y_true = self.y.iloc[res.val_idx]
             y_pred, y_pred_proba = res.y_pred, res.y_pred_proba
-    
+
             for name, fn in metrics.items():
                 if use_proba and name=="auc":
                     if y_pred_proba is None:
@@ -289,7 +309,7 @@ class ParallelGridSearch:
                     score = fn(y_true, y_pred)
                 param_tuple = tuple(sorted(res.param_combination.items()))
                 metric_scores[param_tuple][name].append(score)
-    
+
         summary = []
         for param_tuple, scores_dict in metric_scores.items():
             param_dict = dict(param_tuple)
@@ -297,24 +317,77 @@ class ParallelGridSearch:
                 param_dict[f"{name}_mean"] = np.mean(scores)
                 param_dict[f"{name}_std"] = np.std(scores)
             summary.append(param_dict)
-    
+
         df_summary = pd.DataFrame(summary)
-    
         first_metric = list(metrics.keys())[0]
         df_summary = df_summary.sort_values(
             by=f"{first_metric}_mean", ascending=False
         ).reset_index(drop=True)
-    
+
         return df_summary
 
-    def get_best_params(self, df_summary: pd.DataFrame) -> Dict:
-        """Return the best parameter set from the aggregated results."""
-        best_params = df_summary.iloc[0].drop(["mean_score", "std_score"]).to_dict()
-        print(f"Best Parameters: {best_params}")
-        return best_params
-
-    def get_best_score(self, df_summary: pd.DataFrame) -> float:
-        """Return the best mean score from the aggregated results."""
-        best_score = df_summary.iloc[0]["mean_score"]
-        print(f"Best Score: {best_score}")
-        return best_score
+        def get_best_params(self, df_summary: pd.DataFrame, metric: Optional[str] = None) -> Dict:
+            """
+            Return the best parameter set according to a chosen metric.
+    
+            Parameters
+            ----------
+            df_summary : pd.DataFrame
+                Aggregated results from aggregate_results.
+            metric : str, optional
+                Metric name to use (e.g., "recall", "auc").
+                If None, the first metric in df_summary is used.
+    
+            Returns
+            -------
+            best_params : dict
+                Best parameter combination.
+            """
+            # Detect available metrics
+            metric_names = [c.replace("_mean", "") for c in df_summary.columns if c.endswith("_mean")]
+            if metric is None:
+                metric = metric_names[0]
+                print(f"[INFO] No metric specified, using '{metric}' as default.")
+    
+            if f"{metric}_mean" not in df_summary.columns:
+                raise ValueError(f"Metric '{metric}' not found in df_summary. Available: {metric_names}")
+    
+            # Select best row by chosen metric
+            best_row = df_summary.sort_values(by=f"{metric}_mean", ascending=False).iloc[0]
+    
+            # Drop metric columns to get only params
+            exclude_cols = [c for c in df_summary.columns if c.endswith("_mean") or c.endswith("_std")]
+            best_params = best_row.drop(exclude_cols).to_dict()
+    
+            print(f"Best Parameters (based on {metric}): {best_params}")
+            return best_params
+    
+        def get_best_score(self, df_summary: pd.DataFrame, metric: Optional[str] = None) -> float:
+            """
+            Return the best mean score for a chosen metric.
+    
+            Parameters
+            ----------
+            df_summary : pd.DataFrame
+                Aggregated results from aggregate_results.
+            metric : str, optional
+                Metric name to use (e.g., "recall", "auc").
+                If None, the first metric in df_summary is used.
+    
+            Returns
+            -------
+            best_score : float
+                The best mean score according to the chosen metric.
+            """
+            metric_names = [c.replace("_mean", "") for c in df_summary.columns if c.endswith("_mean")]
+            if metric is None:
+                metric = metric_names[0]
+                print(f"[INFO] No metric specified, using '{metric}' as default.")
+    
+            if f"{metric}_mean" not in df_summary.columns:
+                raise ValueError(f"Metric '{metric}' not found in df_summary. Available: {metric_names}")
+    
+            best_score = df_summary.sort_values(by=f"{metric}_mean", ascending=False).iloc[0][f"{metric}_mean"]
+    
+            print(f"Best {metric}: {best_score}")
+            return best_score
