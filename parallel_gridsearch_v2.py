@@ -243,14 +243,15 @@ class ParallelGridSearch:
             print("[INFO] Training parallelized over folds...")
             all_results = Parallel(n_jobs=self.n_cores, backend="loky")(
                 delayed(self._train_on_preprocessed)(preprocessed, param_comb)
-                for preprocessed in preprocessed_folds
+                for preprocessed in tqdm(preprocessed_folds, desc="Training folds")
                 for param_comb in self.param_grid
             )
+
         else:  # parallel_over == "param"
             print("[INFO] Training parallelized over parameters...")
             all_results = Parallel(n_jobs=self.n_cores, backend="loky")(
                 delayed(self._train_on_preprocessed)(preprocessed, param_comb)
-                for param_comb in self.param_grid
+                for param_comb in tqdm(self.param_grid, desc="Training params")
                 for preprocessed in preprocessed_folds
             )
 
@@ -326,68 +327,68 @@ class ParallelGridSearch:
 
         return df_summary
 
-        def get_best_params(self, df_summary: pd.DataFrame, metric: Optional[str] = None) -> Dict:
-            """
-            Return the best parameter set according to a chosen metric.
-    
-            Parameters
-            ----------
-            df_summary : pd.DataFrame
-                Aggregated results from aggregate_results.
-            metric : str, optional
-                Metric name to use (e.g., "recall", "auc").
-                If None, the first metric in df_summary is used.
-    
-            Returns
-            -------
-            best_params : dict
-                Best parameter combination.
-            """
-            # Detect available metrics
-            metric_names = [c.replace("_mean", "") for c in df_summary.columns if c.endswith("_mean")]
-            if metric is None:
-                metric = metric_names[0]
-                print(f"[INFO] No metric specified, using '{metric}' as default.")
-    
-            if f"{metric}_mean" not in df_summary.columns:
-                raise ValueError(f"Metric '{metric}' not found in df_summary. Available: {metric_names}")
-    
-            # Select best row by chosen metric
-            best_row = df_summary.sort_values(by=f"{metric}_mean", ascending=False).iloc[0]
-    
-            # Drop metric columns to get only params
-            exclude_cols = [c for c in df_summary.columns if c.endswith("_mean") or c.endswith("_std")]
-            best_params = best_row.drop(exclude_cols).to_dict()
-    
-            print(f"Best Parameters (based on {metric}): {best_params}")
-            return best_params
-    
-        def get_best_score(self, df_summary: pd.DataFrame, metric: Optional[str] = None) -> float:
-            """
-            Return the best mean score for a chosen metric.
-    
-            Parameters
-            ----------
-            df_summary : pd.DataFrame
-                Aggregated results from aggregate_results.
-            metric : str, optional
-                Metric name to use (e.g., "recall", "auc").
-                If None, the first metric in df_summary is used.
-    
-            Returns
-            -------
-            best_score : float
-                The best mean score according to the chosen metric.
-            """
-            metric_names = [c.replace("_mean", "") for c in df_summary.columns if c.endswith("_mean")]
-            if metric is None:
-                metric = metric_names[0]
-                print(f"[INFO] No metric specified, using '{metric}' as default.")
-    
-            if f"{metric}_mean" not in df_summary.columns:
-                raise ValueError(f"Metric '{metric}' not found in df_summary. Available: {metric_names}")
-    
-            best_score = df_summary.sort_values(by=f"{metric}_mean", ascending=False).iloc[0][f"{metric}_mean"]
-    
-            print(f"Best {metric}: {best_score}")
-            return best_score
+    def get_best_params(self, df_summary: pd.DataFrame, metric: Optional[str] = None) -> Dict:
+        """
+        Return the best parameter set according to a chosen metric.
+
+        Parameters
+        ----------
+        df_summary : pd.DataFrame
+            Aggregated results from aggregate_results.
+        metric : str, optional
+            Metric name to use (e.g., "recall", "auc").
+            If None, the first metric in df_summary is used.
+
+        Returns
+        -------
+        best_params : dict
+            Best parameter combination.
+        """
+        # Detect available metrics
+        metric_names = [c.replace("_mean", "") for c in df_summary.columns if c.endswith("_mean")]
+        if metric is None:
+            metric = metric_names[0]
+            print(f"[INFO] No metric specified, using '{metric}' as default.")
+
+        if f"{metric}_mean" not in df_summary.columns:
+            raise ValueError(f"Metric '{metric}' not found in df_summary. Available: {metric_names}")
+
+        # Select best row by chosen metric
+        best_row = df_summary.sort_values(by=f"{metric}_mean", ascending=False).iloc[0]
+
+        # Drop metric columns to get only params
+        exclude_cols = [c for c in df_summary.columns if c.endswith("_mean") or c.endswith("_std")]
+        best_params = best_row.drop(exclude_cols).to_dict()
+
+        print(f"Best Parameters (based on {metric}): {best_params}")
+        return best_params
+
+    def get_best_score(self, df_summary: pd.DataFrame, metric: Optional[str] = None) -> float:
+        """
+        Return the best mean score for a chosen metric.
+
+        Parameters
+        ----------
+        df_summary : pd.DataFrame
+            Aggregated results from aggregate_results.
+        metric : str, optional
+            Metric name to use (e.g., "recall", "auc").
+            If None, the first metric in df_summary is used.
+
+        Returns
+        -------
+        best_score : float
+            The best mean score according to the chosen metric.
+        """
+        metric_names = [c.replace("_mean", "") for c in df_summary.columns if c.endswith("_mean")]
+        if metric is None:
+            metric = metric_names[0]
+            print(f"[INFO] No metric specified, using '{metric}' as default.")
+
+        if f"{metric}_mean" not in df_summary.columns:
+            raise ValueError(f"Metric '{metric}' not found in df_summary. Available: {metric_names}")
+
+        best_score = df_summary.sort_values(by=f"{metric}_mean", ascending=False).iloc[0][f"{metric}_mean"]
+
+        print(f"Best {metric}: {best_score}")
+        return best_score

@@ -24,6 +24,7 @@ my_Utils_path = r"C:\Users\mik16\Github\Utils"
 sys.path.append(my_Utils_path)
 
 from parallel_gridsearch_v2 import ParallelGridSearch
+from my_featsel import FeaturesVariance, FeaturesPearson
 from elapsed_timer import Timer
 
 del my_ML_path, my_Utils_path
@@ -40,10 +41,16 @@ y = data.target
 #%% Gridsearch parameters
 
 # Repeated CV
-rskf = RepeatedStratifiedKFold(n_splits=10, n_repeats=2, random_state=42)
+rskf = RepeatedStratifiedKFold(n_splits=10, n_repeats=10, random_state=42)
 
 # Scaler
 scaler = StandardScaler()
+
+# Feature selection methods
+feature_selectors = [
+    FeaturesVariance(threshold_value=50, mode='percentile'),
+    FeaturesPearson(threshold=0.80, alpha=0.01, random_state=42)
+]
 
 # Model
 model = XGBClassifier(
@@ -72,7 +79,7 @@ grid_search = ParallelGridSearch(
     model=model,
     param_grid=param_grid,
     balancer=None,
-    feature_selectors=[],  # puoi testare con selettori anche
+    feature_selectors=feature_selectors,  # puoi testare con selettori anche
     classes_to_save=[1],  # per AUC, classe positiva
     n_cores=-1,  # usa tutti i core
     parallel_over="param",
@@ -101,11 +108,12 @@ with Timer():
     df_results = grid_search.aggregate_results(results, metrics, use_proba=True)
     
 
-#%% Best reuslts
+#%% Best results
 
 # Best results for selected metric
 best_params = grid_search.get_best_params(df_results, metric="auc")
 best_score = grid_search.get_best_score(df_results, metric="auc")
 
-# Show results
-print(df_results)
+# Best parameters and scores (refit)
+print("Best parameters AUC:", grid_search.best_params_)
+print("Best AUC:", grid_search.best_score_)
