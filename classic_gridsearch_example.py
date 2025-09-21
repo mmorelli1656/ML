@@ -20,9 +20,13 @@ from sklearn.pipeline import Pipeline
 my_Utils_path = r"C:\Users\mik16\Github\Utils"
 sys.path.append(my_Utils_path)
 
-from elapsed_timer import Timer
+my_ML_path = r"C:\Users\mik16\Github\ML"
+sys.path.append(my_ML_path)
 
-del my_Utils_path
+from elapsed_timer import Timer
+from my_featsel import FeaturesVariance, FeaturesPearson
+
+del my_ML_path, my_Utils_path
 
 
 #%% Load data
@@ -36,7 +40,7 @@ y = data.target
 #%% Gridsearch parameters
 
 # Repeated CV
-rskf = RepeatedStratifiedKFold(n_splits=10, n_repeats=2, random_state=42)
+rskf = RepeatedStratifiedKFold(n_splits=10, n_repeats=10, random_state=42)
 
 # Model
 model = XGBClassifier(
@@ -46,8 +50,10 @@ model = XGBClassifier(
 
 # Pipeline
 pipeline = Pipeline([
+    ('var_fs', FeaturesVariance(threshold_value=50, mode='percentile')),
+    ('pearson_fs', FeaturesPearson(threshold=0.80, alpha=0.01, random_state=42)),
     ('scaler', StandardScaler()),
-    ('model', model)
+    ('model', XGBClassifier(eval_metric='logloss', random_state=42))
 ])
 
 # Parameters grid
@@ -77,19 +83,34 @@ grid_search = GridSearchCV(
     refit='auc',  # the most important metric
     cv=rskf,
     n_jobs=-1,
-    verbose=2
+    verbose=1
 )
+
+
+#%% Gridsearch
 
 # Gridsearch
 with Timer():
     grid_search.fit(X, y)
 
-# Best parameters and scores (refit)
-print("Migliori parametri secondo AUC:", grid_search.best_params_)
-print("Miglior AUC:", grid_search.best_score_)
+
+#%% Aggregate results
 
 # All results
 results = grid_search.cv_results_
-df_results = pd.DataFrame(results)
+df_results = pd.DataFrame({
+    'params': results['params'],
+    'mean_test_auc': results['mean_test_auc'],
+    'std_test_auc': results['std_test_auc'],
+    'mean_test_recall': results['mean_test_recall'],
+    'std_test_recall': results['std_test_recall'],
+    'mean_test_precision': results['mean_test_precision'],
+    'std_test_precision': results['std_test_precision'],
+})
 
-print(df_results[['params', 'mean_test_auc', 'mean_test_recall', 'mean_test_precision']])
+
+#%% Best results
+
+# Best results for selected metric (refit)
+print("Best parameters AUC:", grid_search.best_params_)
+print("Best AUC:", grid_search.best_score_)
