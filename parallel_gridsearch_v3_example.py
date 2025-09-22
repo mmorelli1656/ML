@@ -34,7 +34,7 @@ del my_ML_path, my_Utils_path
 
 #%% Load data
 
-# Example dataset (unbalanced)
+# Example dataset for classification (unbalanced)
 X, y = make_classification(
     n_samples=1000,      # total number of samples (rows in the dataset)
     n_features=40,       # total number of features (columns)
@@ -108,10 +108,17 @@ with Timer():
 
 #%% Best results
 
-# Best results for selected metric
-best_params = gs.get_best_params(df_results, metric="auc")
-best_score = gs.get_best_score(df_results, metric="auc")
+# Assume 'metrics' dictionary is already defined
+while True:
+    metric = input(f"Select a metric from {list(metrics.keys())}: ").strip()
+    if metric in metrics:
+        break
+    print(f"Invalid choice. Please choose one of {list(metrics.keys())}.")
 
-# Best parameters and scores (refit)
-print("Best parameters AUC:", best_params)
-print("Best AUC:", best_score)
+# Best results for selected metric
+best_params = gs.get_best_params(df_results, metric=metric)
+best_score = gs.get_best_score(df_results, metric=metric)
+
+# Best parameters and scores 
+print(f"Best parameters for {metric}:", best_params)
+print(f"Best {metric}:", best_score)

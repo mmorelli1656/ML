@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-ParallelGridSearch - version with estimator as a Pipeline
-Author: mik16 (refactored)
+ParallelGridSearch - optimized for repeated cross-validation with parallel execution and grid search.
+Author: mik16 
 """
 
 import pandas as pd
