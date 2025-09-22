@@ -1,18 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Mar 25 18:10:16 2025
-
+Feature selection methods - variance, correlation and eta squared.
 @author: mik16
 """
-
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Mar 23 19:24:29 2025
-
-@author: mik16
-"""
-
-#%% Libreries
 
 import numpy as np
 import pandas as pd
@@ -20,8 +10,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import MinMaxScaler
 from scipy.stats import pearsonr
 
-
-#%% Feature selection methods
 
 # ==============================================================
 # Variance feature selection (continuous numerical features)

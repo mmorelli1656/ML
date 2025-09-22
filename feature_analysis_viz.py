@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Sep 15 09:57:04 2025
-
-@author: mik16
+Feature properties visualization - variance and correlation.
+Author: mik16
 """
-
-#%% Libreries
 
 import numpy as np
 import pandas as pd
@@ -13,8 +10,6 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 from pathlib import Path
 
-
-#%% Feature properties visualization
 
 # ==============================================================
 # Feature variance histogram

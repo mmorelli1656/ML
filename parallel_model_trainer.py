@@ -4,8 +4,6 @@ ParallelModelTrainer - optimized for repeated cross-validation with parallel exe
 Author: mik16
 """
 
-#%% Libreries
-
 import pandas as pd
 import numpy as np
 from collections import namedtuple
@@ -15,8 +13,6 @@ from tqdm import tqdm
 from xgboost import XGBClassifier, XGBRegressor
 from typing import List, Optional, Union, Tuple
 
-
-#%% Machine learning
 
 class ParallelModelTrainer:
     """

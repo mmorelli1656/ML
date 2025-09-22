@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Sep 16 15:03:30 2025
-
+eXplainability with SHAP - computes shapley values with a selected explainer.
 @author: mik16
 """
-
-#%% Libreries
 
 import shap
 import pandas as pd
@@ -16,8 +13,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 
-
-#%% XAI with SHAP
 
 class SHAPHandler:
     """

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Jul 29 08:59:25 2025
-
-@author: mik16
+Early stopping for Deep Learning algorithms with secure checkpoints.
+Author: mik16
 """
 
 import torch
 import numpy as np
+
 
 class EarlyStopping:
     """

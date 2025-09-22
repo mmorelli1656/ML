@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Apr  9 15:35:23 2025
-
+Machine learning performance evaluator - works with classification and regression.
 @author: mik16
 """
-
-#%%
 
 import numpy as np
 import pandas as pd
@@ -16,8 +13,6 @@ from sklearn.metrics import confusion_matrix, roc_curve, auc, roc_auc_score
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score
 from pathlib import Path
 
-
-#%%
 
 class EvaluationMetrics:
     def __init__(self, df_pred, df_pred_proba=None, task="binaryclass"):
