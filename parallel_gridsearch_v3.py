@@ -90,11 +90,17 @@ class ParallelGridSearch:
             final_est = model.named_steps["model"]
         
             # Special case: XGB
-            if isinstance(final_est, (XGBClassifier, XGBRegressor)):        
-                # Training
-                model.fit(X_train, y_train, model__eval_set=[(X_val, y_val)])
-        else:
-            model.fit(X_train, y_train)
+            if isinstance(final_est, (XGBClassifier, XGBRegressor)):
+                # Fit parziale della pipeline (solo preprocessing e FS)
+                model[:-1].fit(X_train, y_train)
+            
+                # Trasforma X_val nello stesso spazio
+                X_val_trans = model[:-1].transform(X_val)
+            
+                # Fit completo con eval_set trasformato
+                model.fit(X_train, y_train, model__eval_set=[(X_val_trans, y_val)])
+            else:
+                model.fit(X_train, y_train)
     
         # Predictions
         y_pred = model.predict(X_val)
