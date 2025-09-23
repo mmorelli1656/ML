@@ -155,6 +155,7 @@ class EvaluationMetrics:
         classes=None,
         save_path: str | Path | None = None,
         palette: str = "YlGnBu",
+        annotation_size: int = 12
     ):
         """
         Plot aggregated confusion matrix with uncertainty.
@@ -223,7 +224,7 @@ class EvaluationMetrics:
             cmap=palette,
             xticklabels=classes,
             yticklabels=classes,
-            annot_kws={"size": 14},
+            annot_kws={"size": annotation_size},
         )
         plt.xlabel("Predicted", fontsize=14)
         plt.ylabel("Actual", fontsize=14)
