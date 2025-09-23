@@ -90,8 +90,9 @@ class ParallelGridSearch:
             final_est = model.named_steps["model"]
         
             # Special case: XGB
-            if isinstance(final_est, (XGBClassifier, XGBRegressor)):
-                # Partial fit of the pipeline (only preprocessing and feature selection)
+            if isinstance(final_est, (XGBClassifier, XGBRegressor)) and \
+               hasattr(final_est, "early_stopping_rounds") and \
+               final_est.early_stopping_rounds not in (None, 0):                # Partial fit of the pipeline (only preprocessing and feature selection)
                 model[:-1].fit(X_train, y_train)
         
                 # Transform the validation set using the same preprocessing
