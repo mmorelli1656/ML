@@ -8,6 +8,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, roc_curve, auc, roc_auc_score,
+    mean_absolute_error, mean_absolute_percentage_error,
+    mean_squared_error, r2_score
+)
 from pathlib import Path
 
 
@@ -230,6 +236,81 @@ class EvaluationMetrics:
             plt.savefig(file_path, bbox_inches="tight")
             print(f"Confusion matrix saved to: {file_path}")
 
+        plt.show()
+        plt.close()
+    
+    def plot_roc_curve(self,
+                       stat_method: str = "median_iqr",  # "median_iqr" o "mean_std"
+                       save_path=None):
+        """
+        Plot delle curve ROC per ciascun set di predizioni probabilistiche
+        contenute in self.df_pred_proba. Si assume che la prima colonna
+        sia 'true_labels' e le successive siano le predizioni.
+        
+        Parameters
+        ----------
+        stat_method : {"median_iqr", "mean_std"}, default "median_iqr"
+            Metodo per calcolare la statistica AUC e l'errore:
+            - "median_iqr": mediana ± interquartile range (IQR)
+            - "mean_std": media ± deviazione standard
+        save_path : str | Path | None, default None
+            Percorso per salvare la figura. Se None la figura non viene salvata.
+        """
+    
+        if not hasattr(self, "df_pred_proba") or self.df_pred_proba is None:
+            raise AttributeError("df_pred_proba non è stato trovato o è None.")
+    
+        if not hasattr(self, "task") or self.task != "binaryclass":
+            raise ValueError("Il metodo plot_roc_curve è disponibile solo per problemi di classificazione binaria.")
+    
+        plt.figure(figsize=(8, 6))
+    
+        # Plot curva random
+        plt.plot([0, 1], [0, 1], 'k--', label='Random Model')
+    
+        auc_list = []
+    
+        # ROC curves rosse senza label
+        for col in self.df_pred_proba.columns[1:]:
+            y_scores = self.df_pred_proba[col]
+            fpr, tpr, _ = roc_curve(self.y_true, y_scores)
+            roc_auc = auc(fpr, tpr)
+            plt.plot(fpr, tpr, color='red', alpha=0.4)
+            auc_list.append(roc_auc)
+    
+        auc_list = np.array(auc_list)
+    
+        if stat_method == "median_iqr":
+            auc_stat = np.median(auc_list)
+            auc_err = np.percentile(auc_list, 75) - np.percentile(auc_list, 25)
+            label = f"Median AUC = {auc_stat:.2f} ± {auc_err:.2f} (IQR)"
+        elif stat_method == "mean_std":
+            auc_stat = auc_list.mean()
+            auc_err = auc_list.std(ddof=1)
+            label = f"Mean AUC = {auc_stat:.2f} ± {auc_err:.2f} (Std)"
+        else:
+            raise ValueError("stat_method deve essere 'median_iqr' o 'mean_std'.")
+    
+        # Linee fittizie per la legenda
+        plt.plot([], [], color='red', label='ROC')
+        plt.plot([], [], color='white', label=label)
+    
+        plt.xlabel('False Positive Rate', fontsize=14)
+        plt.ylabel('True Positive Rate', fontsize=14)
+        plt.title('ROC Curve', fontsize=16)
+        plt.legend(fontsize=12)
+        plt.grid(True)
+        plt.tight_layout()
+    
+        # Salvataggio
+        if save_path is not None:
+            from pathlib import Path
+            save_path = Path(save_path)
+            save_path.mkdir(parents=True, exist_ok=True)
+            file_path = save_path / "roc.png"
+            plt.savefig(file_path)
+            print(f"Figura salvata in: {file_path}")
+    
         plt.show()
         plt.close()
 
