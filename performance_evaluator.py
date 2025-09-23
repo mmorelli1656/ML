@@ -350,12 +350,12 @@ class EvaluationMetrics:
                 axes[i].set_title(metric, fontsize=16)
                 axes[i].set_ylabel("Values", fontsize=12)
 
-            plt.suptitle("Regression Metrics Boxplots", fontsize=20)
+            plt.suptitle("Metrics Boxplots", fontsize=20)
             plt.tight_layout(rect=[0, 0.03, 1, 1])
 
         else:
             df_melted = df_metrics.melt(var_name="Metric", value_name="Value")
-            plt.figure(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(10, 6))
             sns.boxplot(
                 x="Metric",
                 y="Value",
@@ -363,11 +363,12 @@ class EvaluationMetrics:
                 hue="Metric",
                 palette=palette,
                 legend=False,
+                ax=ax,
             )
-            plt.xlabel("Metrics", fontsize=14)
-            plt.ylabel("Values", fontsize=14)
-            plt.title("Classification Metrics Boxplot", fontsize=16)
-            plt.xticks(rotation=45, ha="right", fontsize=12)
+            ax.set_xlabel("Metrics", fontsize=14)
+            ax.set_ylabel("Values", fontsize=14)
+            ax.set_title("Metrics Boxplot", fontsize=16)
+            ax.tick_params(axis="x", rotation=45, labelsize=12)
             plt.tight_layout()
 
         if save_path is not None:
