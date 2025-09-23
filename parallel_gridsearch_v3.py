@@ -85,7 +85,7 @@ class ParallelGridSearch:
         model = clone(self.estimator)
         model.set_params(**param_comb)
         
-        # Fit parameters for XGB using set_params
+        # Fit parameters for XGB inside the pipeline
         if hasattr(model, "named_steps") and "model" in model.named_steps:
             final_est = model.named_steps["model"]
         
@@ -94,15 +94,17 @@ class ParallelGridSearch:
                 # Partial fit of the pipeline (only preprocessing and feature selection)
                 model[:-1].fit(X_train, y_train)
         
-                # Transform X_val using the same transformations as X_train
+                # Transform the validation set using the same preprocessing
                 X_val_trans = model[:-1].transform(X_val)
         
-                # Pass eval_set and verbose to the 'model' step via set_params
-                model.set_params(model__eval_set=[(X_val_trans, y_val)],
-                                 model__verbose=False)
-        
                 # Full fit of the pipeline including the XGB model
-                model.fit(X_train, y_train)
+                # Pass eval_set directly for early stopping
+                model.fit(
+                    X_train,
+                    y_train,
+                    model__eval_set=[(X_val_trans, y_val)],
+                    model__verbose=False  # optional; may still print some logs
+                )
             else:
                 # Regular fit for non-XGB models
                 model.fit(X_train, y_train)
