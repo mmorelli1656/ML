@@ -86,18 +86,15 @@ class ParallelGridSearch:
         model.set_params(**param_comb)
         
         # Fit params
-        fit_params = {}
         if hasattr(model, "named_steps") and "model" in model.named_steps:
             final_est = model.named_steps["model"]
         
             # Special case: XGB
-            if isinstance(final_est, (XGBClassifier, XGBRegressor)):
-                # Trasformo solo il validation set fino allo step prima del modello
-                X_val_trans = model[:-1].transform(X_val)
-                fit_params["model__eval_set"] = [(X_val_trans, y_val)]
-        
-        # Training
-        model.fit(X_train, y_train, **fit_params)
+            if isinstance(final_est, (XGBClassifier, XGBRegressor)):        
+                # Training
+                model.fit(X_train, y_train, model__eval_set=[(X_val, y_val)])
+        else:
+            model.fit(X_train, y_train)
     
         # Predictions
         y_pred = model.predict(X_val)
