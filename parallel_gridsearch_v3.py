@@ -98,7 +98,7 @@ class ParallelGridSearch:
                 X_val_trans = model[:-1].transform(X_val)
             
                 # Fit completo con eval_set trasformato
-                model.fit(X_train, y_train, model__eval_set=[(X_val_trans, y_val)], model__verbose_eval=False)
+                model.fit(X_train, y_train, model__eval_set=[(X_val_trans, y_val)])
             else:
                 model.fit(X_train, y_train)
     
