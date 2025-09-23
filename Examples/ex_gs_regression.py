@@ -12,7 +12,7 @@ import pandas as pd
 from sklearn.datasets import make_regression
 from sklearn.model_selection import RepeatedKFold
 from sklearn.preprocessing import StandardScaler
-from imblearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline
 from xgboost import XGBRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.model_selection import ParameterGrid
@@ -23,7 +23,7 @@ sys.path.append(str(Path.home() / "Github" / "ML"))
 sys.path.append(str(Path.home() / "Github" / "Utils"))
 
 from parallel_gridsearch_v3 import ParallelGridSearch
-from my_featsel import FeaturesVariance, FeaturesPearson
+from feature_selection import FeaturesVariance, FeaturesPearson
 from elapsed_timer import Timer
 
 
@@ -47,7 +47,7 @@ y = pd.Series(y)
 # Repeated CV
 rkf = RepeatedKFold(n_splits=5, n_repeats=3, random_state=42)
 
-# Pipeline with scaling, SMOTE, feature selection, model
+# Pipeline with scaling, feature selection, model
 pipe = Pipeline([
     ("scaler", StandardScaler()),
     ('var_fs', FeaturesVariance(mode='percentile')),

@@ -14,6 +14,7 @@ from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
+# from sklearn.pipeline import Pipeline # use it if there is no balancing
 from xgboost import XGBClassifier
 from sklearn.metrics import recall_score, roc_auc_score, precision_score
 from sklearn.model_selection import ParameterGrid
@@ -24,7 +25,7 @@ sys.path.append(str(Path.home() / "Github" / "ML"))
 sys.path.append(str(Path.home() / "Github" / "Utils"))
 
 from parallel_gridsearch_v3 import ParallelGridSearch
-from my_featsel import FeaturesVariance, FeaturesPearson
+from feature_selection import FeaturesVariance, FeaturesPearson
 from elapsed_timer import Timer
 
 
