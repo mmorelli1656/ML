@@ -14,8 +14,8 @@ from typing import Union, List, Dict
 from pathlib import Path
 
 # Import modules
-sys.path.append(str(Path.home / "Github" / "ML"))
-sys.path.append(str(Path.home / "Github" / "Utils"))
+sys.path.append(str(Path.home() / "Github" / "ML"))
+sys.path.append(str(Path.home() / "Github" / "Utils"))
 
 from performance_evaluator import EvaluationMetrics
 from elapsed_timer import Timer
@@ -72,13 +72,13 @@ def generate_example_datasets(
         true_labels_binary = np.random.choice([0, 1], size=n_samples)
 
     if "binary" in tasks:
-        df_binary = pd.DataFrame({'true_labels': true_labels_binary})
+        df_binary = pd.DataFrame({'Labels': true_labels_binary})
         for i in range(1, n_preds + 1):
             df_binary[f'pred{i}'] = np.random.choice([0, 1], size=n_samples)
         datasets["binary"] = df_binary
 
     if "binary_proba" in tasks:
-        df_binary_proba = pd.DataFrame({'true_labels': true_labels_binary})
+        df_binary_proba = pd.DataFrame({'Labels': true_labels_binary})
         for i in range(1, n_preds + 1):
             mean_val = 0.3 + i * 0.2   # diversify probability distributions
             df_binary_proba[f'pred{i}'] = np.clip(
@@ -90,7 +90,7 @@ def generate_example_datasets(
     # ---------------- Multiclass classification ----------------
     if "multiclass" in tasks:
         true_labels_multi = np.random.choice([0, 1, 2], size=n_samples)
-        df_multi = pd.DataFrame({'true_labels': true_labels_multi})
+        df_multi = pd.DataFrame({'Labels': true_labels_multi})
         for i in range(1, n_preds + 1):
             df_multi[f'pred{i}'] = np.random.choice([0, 1, 2], size=n_samples)
         datasets["multiclass"] = df_multi
@@ -98,7 +98,7 @@ def generate_example_datasets(
     # ---------------- Regression ----------------
     if "regression" in tasks:
         true_labels_reg = np.random.uniform(0, 100, n_samples)
-        df_reg = pd.DataFrame({'true_labels': true_labels_reg})
+        df_reg = pd.DataFrame({'Labels': true_labels_reg})
         for i in range(1, n_preds + 1):
             noise = np.random.normal(0, 2 + i * 2, n_samples)  # more noise with larger i
             df_reg[f'pred{i}'] = true_labels_reg + noise
@@ -143,10 +143,10 @@ df_metrics = evaluator.compute_metrics()
 
 # Plot confusion matrix with labels
 classes_name = ['Test1', 'Test2']
-with Timer:
+with Timer():
     evaluator.plot_confusion_matrix(
         perc='row',
-        stat_method="median_iqr",
+        stat_method="mean_std",
         classes=classes_name,
         save_path=None)
 
@@ -177,8 +177,9 @@ df_metrics = evaluator.compute_metrics()
 
 # Plot confusion matrix with labels
 classes_name = ['Test1', 'Test2', 'Test3']
-with Timer:
+with Timer():
     evaluator.plot_confusion_matrix(perc='row',
+                                    stat_method="mean_std",
                                     classes=classes_name,
                                     save_path=None)
 
@@ -201,6 +202,6 @@ evaluator = EvaluationMetrics(df_regression, df_pred_proba=None, task="regressio
 df_metrics = evaluator.compute_metrics()
 
 # Plot metrics boxplots
-evaluator.plot_metrics_boxplot(df_metrics, save=False)
+evaluator.plot_metrics_boxplot(df_metrics, save_path=None)
 
 del evaluator
