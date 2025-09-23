@@ -15,18 +15,14 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 from sklearn.model_selection import ParameterGrid
 from sklearn.pipeline import Pipeline
+from pathlib import Path
 
 # Import modules
-my_Utils_path = r"C:\Users\mik16\Github\Utils"
-sys.path.append(my_Utils_path)
-
-my_ML_path = r"C:\Users\mik16\Github\ML"
-sys.path.append(my_ML_path)
+sys.path.append(str(Path.home() / "Github" / "ML"))
+sys.path.append(str(Path.home() / "Github" / "Utils"))
 
 from elapsed_timer import Timer
 from my_featsel import FeaturesVariance, FeaturesPearson
-
-del my_ML_path, my_Utils_path
 
 
 #%% Load data

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Machine learning performance evaluator - works with classification and regression.
-Author: mik16, revised with improvements
+Author: mik16
 """
 
 import numpy as np

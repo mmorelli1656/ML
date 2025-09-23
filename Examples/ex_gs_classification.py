@@ -17,19 +17,15 @@ from imblearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 from sklearn.metrics import recall_score, roc_auc_score, precision_score
 from sklearn.model_selection import ParameterGrid
+from pathlib import Path
 
 # Import modules
-my_ML_path = r"C:\Users\mik16\Github\ML"
-sys.path.append(my_ML_path)
-
-my_Utils_path = r"C:\Users\mik16\Github\Utils"
-sys.path.append(my_Utils_path)
+sys.path.append(str(Path.home() / "Github" / "ML"))
+sys.path.append(str(Path.home() / "Github" / "Utils"))
 
 from parallel_gridsearch_v3 import ParallelGridSearch
 from my_featsel import FeaturesVariance, FeaturesPearson
 from elapsed_timer import Timer
-
-del my_ML_path, my_Utils_path
 
 
 #%% Load data
