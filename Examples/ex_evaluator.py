@@ -35,10 +35,10 @@ def generate_example_datasets(
 
     Parameters
     ----------
-    n_preds : int, default=3
-        Number of prediction columns to generate.
     n_samples : int, default=10
         Number of rows (samples) in each dataset.
+    n_preds : int, default=5
+        Number of prediction columns to generate.
     tasks : {'binary', 'binary_proba', 'multiclass', 'regression', 'all'} or list, default='all'
         Which datasets to generate. Can be:
         - 'binary' : Binary classification dataset
@@ -72,36 +72,44 @@ def generate_example_datasets(
         true_labels_binary = np.random.choice([0, 1], size=n_samples)
 
     if "binary" in tasks:
-        df_binary = pd.DataFrame({'Labels': true_labels_binary})
-        for i in range(1, n_preds + 1):
-            df_binary[f'pred{i}'] = np.random.choice([0, 1], size=n_samples)
+        preds = pd.DataFrame(
+            np.random.choice([0, 1], size=(n_samples, n_preds)),
+            columns=[f"pred{i}" for i in range(1, n_preds + 1)]
+        )
+        df_binary = pd.concat([pd.DataFrame({'Labels': true_labels_binary}), preds], axis=1)
         datasets["binary"] = df_binary
 
     if "binary_proba" in tasks:
-        df_binary_proba = pd.DataFrame({'Labels': true_labels_binary})
-        for i in range(1, n_preds + 1):
-            mean_val = 0.3 + i * 0.2   # diversify probability distributions
-            df_binary_proba[f'pred{i}'] = np.clip(
+        pred_array = np.zeros((n_samples, n_preds))
+        for i in range(n_preds):
+            mean_val = 0.3 + (i + 1) * 0.2
+            pred_array[:, i] = np.clip(
                 np.random.normal(loc=mean_val, scale=0.15, size=n_samples),
                 0, 1
             )
+        preds_proba = pd.DataFrame(pred_array, columns=[f"pred{i}" for i in range(1, n_preds + 1)])
+        df_binary_proba = pd.concat([pd.DataFrame({'Labels': true_labels_binary}), preds_proba], axis=1)
         datasets["binary_proba"] = df_binary_proba
 
     # ---------------- Multiclass classification ----------------
     if "multiclass" in tasks:
         true_labels_multi = np.random.choice([0, 1, 2], size=n_samples)
-        df_multi = pd.DataFrame({'Labels': true_labels_multi})
-        for i in range(1, n_preds + 1):
-            df_multi[f'pred{i}'] = np.random.choice([0, 1, 2], size=n_samples)
+        preds = pd.DataFrame(
+            np.random.choice([0, 1, 2], size=(n_samples, n_preds)),
+            columns=[f"pred{i}" for i in range(1, n_preds + 1)]
+        )
+        df_multi = pd.concat([pd.DataFrame({'Labels': true_labels_multi}), preds], axis=1)
         datasets["multiclass"] = df_multi
 
     # ---------------- Regression ----------------
     if "regression" in tasks:
         true_labels_reg = np.random.uniform(0, 100, n_samples)
-        df_reg = pd.DataFrame({'Labels': true_labels_reg})
-        for i in range(1, n_preds + 1):
-            noise = np.random.normal(0, 2 + i * 2, n_samples)  # more noise with larger i
-            df_reg[f'pred{i}'] = true_labels_reg + noise
+        pred_array = np.zeros((n_samples, n_preds))
+        for i in range(n_preds):
+            noise = np.random.normal(0, 2 + (i + 1) * 2, n_samples)
+            pred_array[:, i] = true_labels_reg + noise
+        preds_reg = pd.DataFrame(pred_array, columns=[f"pred{i}" for i in range(1, n_preds + 1)])
+        df_reg = pd.concat([pd.DataFrame({'Labels': true_labels_reg}), preds_reg], axis=1)
         datasets["regression"] = df_reg
 
     # Return single DataFrame if only one task was requested
