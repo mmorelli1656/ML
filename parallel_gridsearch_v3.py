@@ -10,6 +10,7 @@ from collections import namedtuple, defaultdict
 from sklearn.base import clone, BaseEstimator
 from sklearn.model_selection import ParameterGrid
 from joblib import Parallel, delayed, cpu_count
+from xgboost import XGBClassifier, XGBRegressor
 from tqdm import tqdm
 from typing import List, Optional, Union, Dict, Callable
 
@@ -83,7 +84,16 @@ class ParallelGridSearch:
         # Clone estimator and set params
         model = clone(self.estimator)
         model.set_params(**param_comb)
-        model.fit(X_train, y_train)
+        
+        # Fit params to use special parameters in .fit
+        fit_params = {}
+        if hasattr(model, "named_steps") and "model" in model.named_steps:
+            final_est = model.named_steps["model"]
+            if isinstance(final_est, (XGBClassifier, XGBRegressor)):
+                fit_params["model__eval_set"] = [(X_val, y_val)]
+    
+        # Training
+        model.fit(X_train, y_train, **fit_params)
     
         # Predictions
         y_pred = model.predict(X_val)
