@@ -77,9 +77,8 @@ def variance_histogram(X, bins=20, percentile=None, save_path=None):
     if save_path is not None:
         file_path = Path(save_path) / "variance_hist.png"
         plt.savefig(file_path, dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        plt.show()
+
+    plt.show()
 
     # Return the variances for further use
     return variances
@@ -154,9 +153,8 @@ def correlation_histogram(X, bins='auto', threshold=None, method='pearson', save
     if save_path is not None:
         file_path = Path(save_path) / f"{method}_corr_hist.png"
         plt.savefig(file_path, dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        plt.show()
+
+    plt.show()
 
     return corr_values
 
@@ -240,8 +238,7 @@ def eta_squared_histogram(X, y, bins='auto', threshold=None, save_path=None):
     if save_path is not None:
         file_path = Path(save_path) / "eta_squared_hist.png"
         plt.savefig(file_path, dpi=300, bbox_inches='tight')
-        plt.close()
-    else:
-        plt.show()
+
+    plt.show()
 
     return eta_series
