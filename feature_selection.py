@@ -18,20 +18,21 @@ class FeaturesVariance(BaseEstimator, TransformerMixin):
     """
     Feature selector that removes low-variance features from a dataset.
 
-    This transformer selects features based on their variance, with two possible
+    This transformer selects features based on their variance, with three possible
     threshold modes:
-    1. 'percentile': select features above a given percentile of variances.
-    2. 'max_percentage': select features above a percentage of the maximum variance.
+      1. 'percentile'    -> select features above a given percentile of variances.
+      2. 'max_percentage'-> select features above a percentage of the maximum variance.
+      3. 'fixed_value'   -> select features above a fixed variance threshold (in [0,1] after MinMax scaling).
 
     Parameters
     ----------
     threshold_value : float, default=90
         Threshold for feature selection. Interpreted according to `mode`.
-        Must be between 0 and 100.
-    mode : {'percentile', 'max_percentage'}, default='percentile'
-        Method to calculate the variance threshold:
-        - 'percentile': select features with variance above the given percentile.
-        - 'max_percentage': select features with variance above a percentage of the maximum variance.
+        - If mode='percentile', must be in (0, 100).
+        - If mode='max_percentage', must be in (0, 100).
+        - If mode='fixed_value', must be in (0, 1).
+    mode : {'percentile', 'max_percentage', 'fixed_value'}, default='percentile'
+        Method to calculate the variance threshold.
 
     Attributes
     ----------
@@ -41,19 +42,26 @@ class FeaturesVariance(BaseEstimator, TransformerMixin):
         Indices of the selected features.
     input_features_ : ndarray of str
         Names of the input features (from DataFrame columns or generated as x0, x1, ...).
-    _output_format : str
-        Output format, either 'default' (NumPy array) or 'pandas' (DataFrame).
-    _is_dataframe : bool
-        Whether the input X during fit was a DataFrame.
     """
 
-    def __init__(self, threshold_value=90, mode="percentile"):
-        if mode not in ["percentile", "max_percentage"]:
-            raise ValueError(f"mode must be 'percentile' or 'max_percentage'. Got: {mode}")
+    _valid_modes = ["percentile", "max_percentage", "fixed_value"]
 
-        if not (0 < threshold_value < 100):
+    def __init__(self, threshold_value=90, mode="percentile"):
+        # --- Validate mode ---
+        if mode not in self._valid_modes:
             raise ValueError(
-                f"threshold_value must be strictly between 0 and 100. Got: {threshold_value}"
+                f"Invalid mode '{mode}'. Accepted modes are: {', '.join(self._valid_modes)}."
+            )
+
+        # --- Validate threshold based on mode ---
+        if mode in ["percentile", "max_percentage"] and not (0 < threshold_value < 100):
+            raise ValueError(
+                f"For mode='{mode}', threshold_value must be strictly between 0 and 100. "
+                f"Got: {threshold_value}"
+            )
+        if mode == "fixed_value" and not (0 < threshold_value <= 1):
+            raise ValueError(
+                f"For mode='fixed_value', threshold_value must be in (0, 1]. Got: {threshold_value}"
             )
 
         self.threshold_value = threshold_value
@@ -61,101 +69,61 @@ class FeaturesVariance(BaseEstimator, TransformerMixin):
         self._output_format = 'default'
 
     def set_output(self, *, transform=None):
-        """
-        Set the output format for the transform method.
-
-        Parameters
-        ----------
-        transform : {'default', 'pandas', None}, optional
-            - 'default': return a NumPy array (default).
-            - 'pandas': return a DataFrame with column names.
-            - None: keep the current format.
-
-        Returns
-        -------
-        self : object
-            Returns the transformer itself.
-        """
+        """Set the output format for the transform method."""
         if transform not in [None, 'default', 'pandas']:
             raise ValueError(f"transform must be 'default', 'pandas', or None. Got: {transform}")
         self._output_format = 'default' if transform is None else transform
         return self
 
     def fit(self, X, y=None):
-        """
-        Compute feature variances and determine which features to keep.
+        """Compute feature variances and determine which features to keep."""
+        # --- Safety check on mode ---
+        if self.mode not in self._valid_modes:
+            raise ValueError(
+                f"Invalid mode '{self.mode}'. Accepted modes are: {', '.join(self._valid_modes)}."
+            )
 
-        Parameters
-        ----------
-        X : {array-like, DataFrame} of shape (n_samples, n_features)
-            Input data.
-        y : Ignored
-            Not used, present for API consistency.
-
-        Returns
-        -------
-        self : object
-            Fitted transformer.
-        """
-        # Check if input is a DataFrame
         self._is_dataframe = isinstance(X, pd.DataFrame)
-
-        # Convert to NumPy array for calculations
         X_values = X.values if self._is_dataframe else np.asarray(X)
 
-        # Raise error if NaNs are present
         if np.isnan(X_values).any():
             raise ValueError("NaN values detected in X. Remove or impute them before fitting.")
 
-        # Scale features to [0, 1] range
-        scaler = MinMaxScaler()
-        X_scaled = scaler.fit_transform(X_values)
-
-        # Compute variance for each feature
+        # Scale to [0, 1] since variances depend on magnitude
+        X_scaled = MinMaxScaler().fit_transform(X_values)
         variances = np.var(X_scaled, axis=0)
 
-        # Determine threshold based on selected mode
+        # Compute threshold according to mode
         if self.mode == "percentile":
-            threshold = np.percentile(variances, self.threshold_value)
-        else:  # max_percentage
-            threshold = (self.threshold_value / 100) * np.max(variances)
-
-        self.threshold_ = threshold
-
-        # Store indices of features above threshold
-        self.selected_features_ = np.where(variances >= threshold)[0]
-
-        # Store feature names
-        if self._is_dataframe:
-            self.input_features_ = np.array(X.columns)
+            self.threshold_ = np.percentile(variances, self.threshold_value)
+        elif self.mode == "max_percentage":
+            self.threshold_ = (self.threshold_value / 100) * np.max(variances)
+        elif self.mode == "fixed_value":
+            self.threshold_ = self.threshold_value
         else:
-            self.input_features_ = np.array([f"x{i}" for i in range(X.shape[1])])
+            # Should never happen, but for extra safety
+            raise ValueError(
+                f"Invalid mode '{self.mode}'. Accepted modes are: {', '.join(self._valid_modes)}."
+            )
+
+        # Select features above threshold
+        self.selected_features_ = np.where(variances >= self.threshold_)[0]
+        self.input_features_ = (
+            np.array(X.columns) if self._is_dataframe
+            else np.array([f"x{i}" for i in range(X.shape[1])])
+        )
 
         return self
 
     def transform(self, X):
-        """
-        Reduce X to the selected features.
-
-        Parameters
-        ----------
-        X : {array-like, DataFrame} of shape (n_samples, n_features)
-            Input data to transform.
-
-        Returns
-        -------
-        X_reduced : {ndarray, DataFrame}
-            Input data with only selected features.
-        """
+        """Reduce X to the selected features."""
         X_values = X.values if isinstance(X, pd.DataFrame) else np.asarray(X)
         transformed = X_values[:, self.selected_features_]
 
-        # Return as DataFrame if requested
         if self._output_format == 'pandas':
             selected_names = self.get_feature_names_out()
             return pd.DataFrame(transformed, columns=selected_names, index=getattr(X, 'index', None))
 
-        # Otherwise return NumPy array
         return transformed
 
     def fit_transform(self, X, y=None):
@@ -163,24 +131,7 @@ class FeaturesVariance(BaseEstimator, TransformerMixin):
         return self.fit(X, y).transform(X)
 
     def get_feature_names_out(self, input_features=None):
-        """
-        Get the names of the selected features.
-
-        Parameters
-        ----------
-        input_features : array-like of str, optional
-            Original feature names. If None, uses names stored during fit.
-
-        Returns
-        -------
-        selected_feature_names : ndarray of str
-            Names of the selected features.
-
-        Raises
-        ------
-        AttributeError
-            If transformer is called before fitting and no input_features are provided.
-        """
+        """Get names of the selected features."""
         if input_features is None:
             input_features = getattr(self, 'input_features_', None)
             if input_features is None:
