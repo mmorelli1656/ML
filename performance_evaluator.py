@@ -314,6 +314,77 @@ class EvaluationMetrics:
     
         plt.show()
         plt.close()
+        
+    def plot_class_probabilities(
+        self,
+        threshold: float = 0.5,
+        bins: int | str = "auto",
+        labels: list[str] | None = None,
+        palette: list[str] = ["skyblue", "salmon"],
+        save_path: str | Path | None = None
+    ):
+        """
+        Plot probability distributions of the two classes for a binary classification problem.
+    
+        Parameters
+        ----------
+        threshold : float, default=0.5
+            Threshold to separate the predicted classes.
+        bins : int or str, default="auto"
+            Number of bins or strategy for histogram.
+        labels : list of str, optional
+            Names of the two classes. If None, defaults to ['Class 0', 'Class 1'].
+        palette : list of str, default=["skyblue", "salmon"]
+            Colors for the histograms of the two classes.
+        save_path : str or Path, optional
+            Directory to save the figure. If None, the figure is shown.
+        """
+        if self.task != "binaryclass":
+            raise ValueError("plot_class_probabilities is only available for binary classification.")
+    
+        if self.df_pred_proba is None:
+            raise ValueError("df_pred_proba must be provided for plotting probabilities.")
+    
+        # Default labels
+        if labels is None:
+            labels = ["Class 0", "Class 1"]
+    
+        y_scores = self.df_pred_proba.iloc[:, 1].values  # Probabilities of positive class
+        y_true = self.df_pred.iloc[:, 0].values
+    
+        plt.figure(figsize=(8, 6))
+        
+        # Histogram for each true class
+        for cls_idx in [0, 1]:
+            cls_scores = y_scores[y_true == cls_idx]
+            plt.hist(
+                cls_scores,
+                bins=bins,
+                color=palette[cls_idx],
+                alpha=0.6,
+                label=f"{labels[cls_idx]} (n={len(cls_scores)})",
+                edgecolor='k'
+            )
+    
+        # Threshold line
+        plt.axvline(threshold, color='black', linestyle='--', lw=2, label=f"Threshold = {threshold}")
+    
+        plt.xlabel("Predicted Probability", fontsize=14)
+        plt.ylabel("Count", fontsize=14)
+        plt.title("Predicted Probability Distribution per Class", fontsize=16)
+        plt.legend(fontsize=12)
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.tight_layout()
+    
+        if save_path is not None:
+            save_path = Path(save_path)
+            save_path.mkdir(parents=True, exist_ok=True)
+            file_path = save_path / "class_probabilities.png"
+            plt.savefig(file_path, bbox_inches="tight")
+            print(f"Figure saved to: {file_path}")
+    
+        plt.show()
+        plt.close()
 
     def plot_metrics_boxplot(
         self, df_metrics: pd.DataFrame, save_path: str | Path | None = None, palette: str = "Set2"
