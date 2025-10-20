@@ -324,8 +324,9 @@ class EvaluationMetrics:
         save_path: str | Path | None = None
     ):
         """
-        Plot probability distributions of the two classes for a binary classification problem.
-    
+        Plot probability distributions of the two classes for a binary classification problem,
+        supporting multiple repetitions of cross-validation by flattening all probability columns.
+        
         Parameters
         ----------
         threshold : float, default=0.5
@@ -345,18 +346,22 @@ class EvaluationMetrics:
         if self.df_pred_proba is None:
             raise ValueError("df_pred_proba must be provided for plotting probabilities.")
     
-        # Default labels
+        # Set default labels if not provided
         if labels is None:
             labels = ["Class 0", "Class 1"]
     
-        y_scores = self.df_pred_proba.iloc[:, 1].values  # Probabilities of positive class
-        y_true = self.df_pred.iloc[:, 0].values
+        # Flatten all probability columns (all CV repetitions)
+        y_scores = self.df_pred_proba.iloc[:, 1:].values.flatten()
+    
+        # Repeat the true labels for each repetition
+        n_reps = self.df_pred_proba.shape[1] - 1
+        y_true_repeated = np.repeat(self.df_pred.iloc[:, 0].values, n_reps)
     
         plt.figure(figsize=(8, 6))
-        
-        # Histogram for each true class
+    
+        # Plot histogram for each true class
         for cls_idx in [0, 1]:
-            cls_scores = y_scores[y_true == cls_idx]
+            cls_scores = y_scores[y_true_repeated == cls_idx]
             plt.hist(
                 cls_scores,
                 bins=bins,
@@ -366,7 +371,7 @@ class EvaluationMetrics:
                 edgecolor='k'
             )
     
-        # Threshold line
+        # Draw threshold line
         plt.axvline(threshold, color='black', linestyle='--', lw=2, label=f"Threshold = {threshold}")
     
         plt.xlabel("Predicted Probability", fontsize=14)
@@ -376,6 +381,7 @@ class EvaluationMetrics:
         plt.grid(True, linestyle="--", alpha=0.5)
         plt.tight_layout()
     
+        # Save figure if save_path is provided
         if save_path is not None:
             save_path = Path(save_path)
             save_path.mkdir(parents=True, exist_ok=True)
@@ -383,6 +389,7 @@ class EvaluationMetrics:
             plt.savefig(file_path, bbox_inches="tight")
             print(f"Figure saved to: {file_path}")
     
+        # Show plot and close
         plt.show()
         plt.close()
 
