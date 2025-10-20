@@ -367,7 +367,7 @@ class EvaluationMetrics:
                 bins=bins,
                 color=palette[cls_idx],
                 alpha=0.6,
-                label=f"{labels[cls_idx]} (n={len(cls_scores)})",
+                label=f"{labels[cls_idx]}",
                 edgecolor='k'
             )
     
