@@ -358,17 +358,22 @@ class EvaluationMetrics:
         y_true_repeated = np.repeat(self.df_pred.iloc[:, 0].values, n_reps)
     
         plt.figure(figsize=(8, 6))
+        
+        # Compute common bin edges for both classes
+        min_val = y_scores.min()
+        max_val = y_scores.max()
+        bin_edges = np.linspace(min_val, max_val, bins)  # 100 bins
     
         # Plot histogram for each true class
         for cls_idx in [0, 1]:
             cls_scores = y_scores[y_true_repeated == cls_idx]
             plt.hist(
                 cls_scores,
-                bins=bins,
+                bins=bin_edges,
                 color=palette[cls_idx],
                 alpha=0.6,
                 label=f"{labels[cls_idx]}",
-                edgecolor='k'
+                edgecolor='none'
             )
     
         # Draw threshold line
