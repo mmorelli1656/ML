@@ -55,7 +55,6 @@ class XGBAdapter(ModelAdapter):
             X_train,
             y_train,
             eval_set=[(X_train, y_train), (X_val, y_val)],
-            eval_metric="logloss",
             verbose=False,
             evals_result=evals_result,
         )
