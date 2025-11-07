@@ -50,13 +50,13 @@ class XGBAdapter(ModelAdapter):
     """Adapter for XGBoost models (supports eval history)."""
 
     def fit(self, model, X_train, y_train, X_val=None, y_val=None):
-        evals_result = {}
         model.fit(
             X_train,
             y_train,
             eval_set=[(X_train, y_train), (X_val, y_val)],
             verbose=False,
         )
+        evals_result = model.evals_result()
         return model, evals_result
 
 
