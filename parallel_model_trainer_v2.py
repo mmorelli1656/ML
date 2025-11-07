@@ -56,7 +56,6 @@ class XGBAdapter(ModelAdapter):
             y_train,
             eval_set=[(X_train, y_train), (X_val, y_val)],
             verbose=False,
-            evals_result=evals_result,
         )
         return model, evals_result
 
