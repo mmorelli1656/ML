@@ -1,19 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-Created on Sun Nov  9 18:09:59 2025
-
-@author: mik16
-"""
-
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Nov  7 19:01:44 2025
-
-@author: mik16
-"""
-
-# -*- coding: utf-8 -*-
-"""
 ParallelModelTrainer v2.0
 Generic parallel cross-validation trainer with model adapters.
 
