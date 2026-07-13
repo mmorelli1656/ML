@@ -7,17 +7,11 @@ Created on Sun Mar 30 12:22:39 2025
 
 #%% Libreries and modules
 
-import sys
 import pandas as pd
 import numpy as np
 from typing import Union, List, Dict
-from pathlib import Path
 
-# Import modules
-sys.path.append(str(Path.home() / "Github" / "ML"))
-sys.path.append(str(Path.home() / "Github" / "Utils"))
-
-from performance_evaluator import EvaluationMetrics
+from performance_evaluator import MetricsEvaluator, MetricsPlotter
 from elapsed_timer import Timer
 
 
@@ -120,10 +114,13 @@ def generate_example_datasets(
 
 #%% Datasets parameters
 
-# Number of samples
-n_samples = int(input("Enter the number of rows (samples) for each dataset: "))
-# Number of repeated CV n_repeats
-n_preds = int(input("Enter the number of prediction columns: "))
+# # Number of samples
+# n_samples = int(input("Enter the number of rows (samples) for each dataset: "))
+n_samples = 500
+
+# # Number of repeated CV n_repeats
+# n_preds = int(input("Enter the number of prediction columns: "))
+n_preds = 1000
 
 
 #%% Binary classification (with probabilities)
@@ -135,6 +132,9 @@ df_binaryclass = generate_example_datasets(
     tasks="binary"
 )
 
+# Extract true values
+y_true = df_binaryclass.pop('Labels')
+
 # Binary classification with predicted probabilities
 df_binaryclass_proba = generate_example_datasets(
     n_samples=n_samples,
@@ -142,29 +142,33 @@ df_binaryclass_proba = generate_example_datasets(
     tasks="binary_proba"
 )
 
-# Initialize evaluator
-evaluator = EvaluationMetrics(df_pred=df_binaryclass, df_pred_proba=df_binaryclass_proba,
-                              task="binaryclass")
+# Delete true values from probabilities
+df_binaryclass_proba = df_binaryclass_proba.drop(["Labels"], axis=1)
+
+# Initialize metrics evaluator
+evaluator = MetricsEvaluator(task="binaryclass")
 
 # Compute perfomances metrics
-df_metrics = evaluator.compute_metrics()
+df_metrics = evaluator.compute_metrics(y_true, df_binaryclass, df_binaryclass_proba)
+
+# Initialize metrics plotter
+plotter = MetricsPlotter(evaluator)
 
 # Plot confusion matrix with labels
 classes_name = ['Test1', 'Test2']
+
 with Timer():
-    evaluator.plot_confusion_matrix(
+    plotter.plot_confusion_matrix(
         perc='row',
         stat_method="mean_std",
         classes=classes_name,
         save_path=None)
 
 # Plot ROC curves
-evaluator.plot_roc_curve(save_path=None)
+plotter.plot_roc_curve(save_path=None)
 
 # Plot metrics boxplots
-evaluator.plot_metrics_boxplot(df_metrics, save_path=None)
-
-del classes_name, evaluator
+plotter.plot_metrics_boxplot(df_metrics, save_path=None)
 
 
 #%% Evaluator classificazione multiclasse
