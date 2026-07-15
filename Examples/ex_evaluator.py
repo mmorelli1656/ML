@@ -153,7 +153,10 @@ df_binaryclass_proba = generate_example_datasets(
 df_binaryclass_proba = df_binaryclass_proba.drop(["Labels"], axis=1)
 
 # Initialize metrics evaluator
-evaluator = MetricsEvaluator(task="binaryclass")
+evaluator = MetricsEvaluator(
+    task="binaryclass", 
+    exclude_metrics=["F1-score"]
+    )
 
 # Compute perfomances metrics
 df_metrics = evaluator.compute_metrics(y_true, df_binaryclass, df_binaryclass_proba)
@@ -173,6 +176,9 @@ with Timer():
 
 # Plot ROC curves
 plotter.plot_roc_curve(save_path=None)
+
+# Plot classes probabilities
+plotter.plot_class_probabilities(save_path=None)
 
 # Plot metrics boxplots
 plotter.plot_metrics_boxplot(df_metrics, save_path=None)
