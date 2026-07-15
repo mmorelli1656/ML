@@ -21,6 +21,7 @@ def generate_example_datasets(
     n_samples: int = 10,
     n_preds: int = 5,
     tasks: Union[str, List[str]] = "all",
+    n_classes: int = 3,
     random_state: int = 42
 ) -> Union[pd.DataFrame, Dict[str, pd.DataFrame]]:
     """
@@ -41,6 +42,9 @@ def generate_example_datasets(
         - 'regression' : Regression dataset
         - 'all' : Generate all datasets
         - list of the above
+    n_classes : int, default=3
+        Number of classes to use for the multiclass dataset. Must be >= 2.
+        Ignored for all other tasks.
     random_state : int, default=42
         Random seed for reproducibility.
 
@@ -50,8 +54,10 @@ def generate_example_datasets(
         - If a single dataset is requested, returns that DataFrame.
         - If multiple datasets are requested, returns a dictionary.
     """
-    np.random.seed(random_state)
+    if n_classes < 2:
+        raise ValueError(f"n_classes must be >= 2, got {n_classes}")
 
+    np.random.seed(random_state)
     # Normalize tasks input
     if isinstance(tasks, str):
         if tasks == "all":
@@ -87,9 +93,10 @@ def generate_example_datasets(
 
     # ---------------- Multiclass classification ----------------
     if "multiclass" in tasks:
-        true_labels_multi = np.random.choice([0, 1, 2], size=n_samples)
+        classes = np.arange(n_classes)
+        true_labels_multi = np.random.choice(classes, size=n_samples)
         preds = pd.DataFrame(
-            np.random.choice([0, 1, 2], size=(n_samples, n_preds)),
+            np.random.choice(classes, size=(n_samples, n_preds)),
             columns=[f"pred{i}" for i in range(1, n_preds + 1)]
         )
         df_multi = pd.concat([pd.DataFrame({'Labels': true_labels_multi}), preds], axis=1)
@@ -173,29 +180,38 @@ plotter.plot_metrics_boxplot(df_metrics, save_path=None)
 
 #%% Evaluator classificazione multiclasse
 
+n_classes = 5
+
 # Multiclass classification dataset
 df_multiclass = generate_example_datasets(
     n_samples=n_samples,
     n_preds=n_preds,
-    tasks="multiclass"
+    tasks="multiclass",
+    n_classes=n_classes
 )
 
+# Extract true values
+y_true = df_multiclass.pop('Labels')
+
 # Initialize evaluator
-evaluator = EvaluationMetrics(df_multiclass, df_pred_proba=None,
-                              task="multiclass")
+evaluator = MetricsEvaluator(task="multiclass")
 
 # Compute perfomances metrics
-df_metrics = evaluator.compute_metrics()
+df_metrics = evaluator.compute_metrics(y_true, df_multiclass)
+
+# Initialize metrics plotter
+plotter = MetricsPlotter(evaluator)
 
 # Plot confusion matrix with labels
-classes_name = ['Test1', 'Test2', 'Test3']
+classes_name = [f"Test_{i}" for i in range(n_classes)]
 with Timer():
-    evaluator.plot_confusion_matrix(perc='row',
+    plotter.plot_confusion_matrix(perc='row',
                                     stat_method="mean_std",
                                     classes=classes_name,
                                     save_path=None)
-
-del classes_name, evaluator
+    
+# Plot metrics boxplots
+plotter.plot_metrics_boxplot(df_metrics, save_path=None)
 
 
 #%% Evaluator regressione
@@ -207,13 +223,18 @@ df_regression = generate_example_datasets(
     tasks="regression"
 )
 
+# Extract true values
+y_true = df_regression.pop('Labels')
+
 # Initialize evaluator
-evaluator = EvaluationMetrics(df_regression, df_pred_proba=None, task="regression")
+evaluator = MetricsEvaluator(task="regression")
 
 # Compute perfomances metrics
-df_metrics = evaluator.compute_metrics()
+df_metrics = evaluator.compute_metrics(y_true, df_regression)
+
+# Initialize metrics plotter
+plotter = MetricsPlotter(evaluator)
 
 # Plot metrics boxplots
-evaluator.plot_metrics_boxplot(df_metrics, save_path=None)
+plotter.plot_metrics_boxplot(df_metrics, save_path=None)
 
-del evaluator
