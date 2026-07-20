@@ -1,0 +1,26 @@
+# Core dependencies for ParallelModelTrainer / adapters.py / example_usage.py
+# and the broader evaluation/SHAP workflow. Tested with Python 3.11+.
+
+pandas>=2.2,<3.1
+numpy>=1.26,<3.0
+matplotlib>=3.8,<3.11
+
+# Machine learning
+scikit-learn>=1.4,<1.9
+xgboost>=2.0,<3.4
+
+# Model interpretability (SHAPHandler)
+shap>=0.45,<0.53
+
+# Parallelism & utilities
+joblib>=1.3,<1.6          # >=1.3 required for accurate progress tracking
+                          # (Parallel return_as="generator_unordered")
+tqdm>=4.66,<5.0
+
+# Optional: only needed if you pass a `balancer` (e.g. SMOTE) to
+# ParallelModelTrainer. Uncomment if you use one.
+imbalanced-learn>=0.12,<0.14
+
+# IDE integration: lets Spyder (installed in base) connect to this
+# environment's kernel. Not needed if you don't use Spyder.
+spyder-kernels>=2.5,<3.1
