@@ -40,7 +40,7 @@ class SHAPHandler:
         Level of parallelization:
         - "fold": parallelize over individual folds
         - "repeat": parallelize over repetitions
-        - None: sequential execution
+        - None: sequential execution (default; no joblib/loky involved)
 
     Attributes
     ----------
@@ -52,11 +52,14 @@ class SHAPHandler:
         The dataset used in the last call to `compute_shap_values()`.
         Stored so that `SHAPPlotter` can reuse it without needing it passed
         in again.
+    target_class_ : int or label or None
+        The class selected in the last call to `compute_shap_values()`.
 
     Examples
     --------
     >>> handler = SHAPHandler(explainer_type="tree", n_jobs=4, parallel_level="fold")
-    >>> shap_dict = handler.compute_shap_values(results, X, rkf, use_scaled=True)
+    >>> shap_dict = handler.compute_shap_values(results, X, rkf, use_scaled=True,
+    ...                                          target_class=1)
     >>>
     >>> plotter = SHAPPlotter(handler)
     >>> top_features = plotter.plot_summary_aggregated(max_display=10)
@@ -77,6 +80,7 @@ class SHAPHandler:
         # Populated by compute_shap_values()
         self.shap_dict_: Optional[Dict[int, pd.DataFrame]] = None
         self.X_: Optional[pd.DataFrame] = None
+        self.target_class_ = None
 
     def _get_explainer(self, result, X, use_scaled):
         """
@@ -115,7 +119,108 @@ class SHAPHandler:
         else:
             raise ValueError(f"Explainer type '{self.explainer_type}' is not supported.")
 
-    def _compute_fold_shap(self, result, n_folds, X, use_scaled):
+    def _class_to_index(self, classes, target_class, n_classes):
+        """
+        Map `target_class` (a real class label, e.g. 1 or "yes") to its
+        positional index in the SHAP output, using `model.classes_` when
+        available. Falls back to treating `target_class` as a positional
+        index if the model exposes no `.classes_` attribute.
+        """
+        if classes is not None:
+            classes = list(classes)
+            if target_class not in classes:
+                raise ValueError(
+                    f"target_class={target_class!r} not found in "
+                    f"model.classes_={classes}."
+                )
+            return classes.index(target_class)
+
+        if not (0 <= target_class < n_classes):
+            raise ValueError(
+                f"target_class={target_class} out of range for {n_classes} "
+                "classes (model has no `.classes_` attribute, so target_class "
+                "is treated as a positional index)."
+            )
+        return target_class
+
+    def _select_class_slice(self, shap_values, model, target_class=None):
+        """
+        Select the 2D (n_samples, n_features) SHAP slice for a single class,
+        handling both binary and multiclass outputs, and both the old
+        (list-of-arrays) and current (Explanation with 3D .values) SHAP APIs.
+
+        Binary models (2 classes): `target_class` is OPTIONAL. Defaults to
+        the positive class (index 1 of `model.classes_`) if not given,
+        matching the previous implicit behaviour. Pass `target_class`
+        explicitly to select the other class instead.
+
+        Multiclass models (3+ classes): `target_class` is REQUIRED. There
+        is no sensible default, since aggregating classes together would
+        mix signs and mislead any downstream ranking. Omitting it raises a
+        descriptive ValueError instead of silently picking a class.
+
+        Parameters
+        ----------
+        shap_values : list or shap.Explanation
+            Raw output of `explainer(X_val)`.
+        model : object
+            The fold's trained model (used to read `.classes_` if
+            available, so `target_class` can be given as an actual class
+            label rather than a positional index).
+        target_class : int or label, optional
+            Which class's SHAP values to select.
+
+        Returns
+        -------
+        np.ndarray of shape (n_samples, n_features)
+        """
+        classes = getattr(model, "classes_", None)
+
+        # --- Old API: list of arrays, one per class ---
+        if isinstance(shap_values, list):
+            n_classes = len(shap_values)
+            if n_classes == 2:
+                if target_class is None:
+                    return shap_values[1]  # positive class by convention
+                idx = self._class_to_index(classes, target_class, n_classes)
+                return shap_values[idx]
+            if target_class is None:
+                raise ValueError(
+                    f"Model has {n_classes} classes; SHAP values are computed "
+                    "per-class. You must specify `target_class` explicitly "
+                    "(e.g. target_class=1) to select which class to use."
+                )
+            idx = self._class_to_index(classes, target_class, n_classes)
+            return shap_values[idx]
+
+        # --- Current API: Explanation object with .values ---
+        values = shap_values.values if hasattr(shap_values, "values") else shap_values
+        if not isinstance(values, np.ndarray):
+            raise ValueError("Unsupported SHAP output type.")
+
+        if values.ndim == 2:
+            # Already (n_samples, n_features): regression or single-output binary
+            return values
+
+        if values.ndim == 3:
+            n_classes = values.shape[2]
+            if n_classes == 2:
+                if target_class is None:
+                    return values[:, :, 1]
+                idx = self._class_to_index(classes, target_class, n_classes)
+                return values[:, :, idx]
+            if target_class is None:
+                raise ValueError(
+                    f"Model has {n_classes} classes; SHAP values have shape "
+                    f"{values.shape}. You must specify `target_class` explicitly "
+                    "(e.g. target_class=1) to select which class to use."
+                )
+            idx = self._class_to_index(classes, target_class, n_classes)
+            return values[:, :, idx]
+
+        raise ValueError(f"Unexpected SHAP values array shape: {values.shape}")
+
+    def _compute_fold_shap(self, result, n_folds, X, use_scaled, target_class=None):
         """
         Compute SHAP values for a single fold.
 
@@ -131,6 +236,10 @@ class SHAPHandler:
         use_scaled : bool
             Whether to use the scaled features (if a scaler is available
             in `result`).
+        target_class : int or label, optional
+            Which class's SHAP values to compute. Optional for binary
+            models (defaults to the positive class), REQUIRED for
+            multiclass models (3+ classes).
 
         Returns
         -------
@@ -157,22 +266,9 @@ class SHAPHandler:
         # Compute SHAP values for the validation set
         shap_values = explainer(X_val)
 
-        # --- Robust handling for different SHAP outputs ---
-        if isinstance(shap_values, list):
-            # Old API returns a list of arrays, one per class
-            # For binary classification, take the positive class (index 1)
-            if len(shap_values) == 2:
-                shap_values_2d = shap_values[1]
-            else:
-                shap_values_2d = shap_values[0]  # single class / regression
-        elif isinstance(shap_values.values, np.ndarray):
-            if shap_values.values.ndim == 3 and shap_values.values.shape[2] == 2:
-                # shape = (n_samples, n_features, n_classes)
-                shap_values_2d = shap_values.values[:, :, 1]  # take positive class
-            else:
-                shap_values_2d = shap_values.values
-        else:
-            raise ValueError("Unsupported SHAP output type.")
+        # Select the correct class slice (binary: optional target_class,
+        # multiclass: required target_class) instead of silently guessing
+        shap_values_2d = self._select_class_slice(shap_values, result.model, target_class)
 
         # Create a DataFrame aligned with original dataset
         df_shap = pd.DataFrame(
@@ -190,6 +286,7 @@ class SHAPHandler:
         X: pd.DataFrame,
         rkf,
         use_scaled: bool = False,
+        target_class=None,
     ) -> Dict[int, pd.DataFrame]:
         """
         Compute SHAP values for all folds and aggregate them by repetition.
@@ -213,11 +310,22 @@ class SHAPHandler:
             (if a scaler is available in `results`). Tied to this specific
             (results, X) pair rather than to the handler's configuration,
             since whether scaling applies depends on how `results` was built.
+        target_class : int or label, optional
+            Which class's SHAP values to compute.
+            - Binary models (2 classes): optional. Defaults to the
+              positive class (index 1 of `model.classes_`) if omitted.
+            - Multiclass models (3+ classes): REQUIRED. Omitting it raises
+              a descriptive ValueError rather than silently picking a
+              class, since aggregating classes together would mix signs
+              and mislead any downstream ranking.
+            The value is the actual class label (e.g. 1, "yes"), not a
+            positional index; it's resolved against `model.classes_`.
 
         Returns
         -------
         shap_dict : dict of {int: pd.DataFrame}
-            Dictionary mapping repetition indices to DataFrames of SHAP values.
+            Dictionary mapping repetition indices to DataFrames of SHAP values,
+            for the selected `target_class`.
         """
         # Get number of repetitions and folds per repetition
         n_repeats = getattr(rkf, "n_repeats", 1)
@@ -229,7 +337,7 @@ class SHAPHandler:
         if self.parallel_level == "fold":
             # Parallelize across folds
             fold_results = Parallel(n_jobs=self.n_jobs, backend=self.backend)(
-                delayed(self._compute_fold_shap)(res, n_folds, X, use_scaled)
+                delayed(self._compute_fold_shap)(res, n_folds, X, use_scaled, target_class)
                 for res in tqdm(results, desc="Computing SHAP per fold")
             )
             # Collect results
@@ -242,7 +350,7 @@ class SHAPHandler:
                 folds = []
                 # Process only folds belonging to repetition r
                 for res in [res for res in results if (res.fold_idx // n_folds) + 1 == r]:
-                    _, df_shap = self._compute_fold_shap(res, n_folds, X, use_scaled)
+                    _, df_shap = self._compute_fold_shap(res, n_folds, X, use_scaled, target_class)
                     folds.append(df_shap)
                 return r, folds
 
@@ -256,7 +364,7 @@ class SHAPHandler:
         else:
             # Sequential execution (no parallelization)
             for res in tqdm(results, desc="Computing SHAP sequentially"):
-                repeat_idx, df_shap = self._compute_fold_shap(res, n_folds, X, use_scaled)
+                repeat_idx, df_shap = self._compute_fold_shap(res, n_folds, X, use_scaled, target_class)
                 shap_dict[repeat_idx].append(df_shap)
 
         # Aggregate folds for each repetition into a single DataFrame
@@ -268,6 +376,7 @@ class SHAPHandler:
 
         self.shap_dict_ = shap_dict
         self.X_ = X
+        self.target_class_ = target_class
         return shap_dict
 
 
@@ -292,7 +401,7 @@ class SHAPPlotter:
     Examples
     --------
     >>> handler = SHAPHandler(explainer_type="tree")
-    >>> handler.compute_shap_values(results, X, rkf)
+    >>> handler.compute_shap_values(results, X, rkf, target_class=1)
     >>> plotter = SHAPPlotter(handler)
     >>> top_features = plotter.plot_summary_aggregated(max_display=10)
     """
@@ -321,14 +430,15 @@ class SHAPPlotter:
         show: Optional[bool] = None,
     ):
         """
-        Plot an aggregated SHAP summary across all repetitions and folds.
-    
+        Plot an aggregated SHAP summary across all repetitions and folds,
+        for the class selected in `handler.compute_shap_values(target_class=...)`.
+
         NaNs (features not selected in a given fold) are excluded from the
         importance ranking calculation rather than treated as zero
         contribution, since the two cases are semantically different.
         Only for the plot itself NaNs are filled with 0 (shap.summary_plot
         requires a dense matrix), but the ranking uses nan-aware statistics.
-    
+
         Parameters
         ----------
         max_display : int, default=20
@@ -344,7 +454,7 @@ class SHAPPlotter:
             If provided, saves the plot to the specified path.
         show : bool, optional
             Overrides the plotter's default `show` behaviour for this call.
-    
+
         Returns
         -------
         top_features : pd.DataFrame
@@ -353,48 +463,48 @@ class SHAPPlotter:
             by MeanAbsSHAP descending.
         """
         self._check_computed()
-    
+
         shap_dict = self.handler.shap_dict_
         X = self.handler.X_
-    
+
         # Concatenate all repetitions
         df_shap_all = pd.concat([shap_dict[r] for r in shap_dict], axis=0)
         n_total_samples = len(df_shap_all)
-    
+
         # --- Ranking: ignore NaNs, don't treat them as zero contribution ---
         mean_abs_shap = df_shap_all.abs().mean(axis=0, skipna=True)
         selection_count = df_shap_all.notna().sum(axis=0)
         selection_frac = selection_count / n_total_samples
-    
+
         feature_importance = pd.DataFrame({
             "MeanAbsSHAP": mean_abs_shap,
             "SelectionCount": selection_count,
             "SelectionFrac": selection_frac,
         })
-    
+
         # Apply threshold before ranking/truncating to max_display
         kept_features = feature_importance[
             feature_importance["SelectionFrac"] >= min_selection_frac
         ].index
-    
+
         if len(kept_features) == 0:
             raise ValueError(
                 f"No feature meets min_selection_frac={min_selection_frac}. "
                 "Lower the threshold."
             )
-    
+
         top_features = feature_importance.loc[kept_features].sort_values(
             by="MeanAbsSHAP", ascending=False
         ).head(max_display)
-    
+
         # --- Plot: only the surviving (and displayed) features ---
         plotted_features = top_features.index
         df_shap_plot = df_shap_all[plotted_features]
         df_features_plot = X.loc[df_shap_plot.index, plotted_features]
-    
+
         shap_values_concatenated = df_shap_plot.fillna(0).values
         features_values = df_features_plot.fillna(0).values
-    
+
         plt.title("SHAP Summary Plot - Global case", fontsize=15, loc='center')
         shap.summary_plot(
             shap_values_concatenated,
@@ -406,7 +516,7 @@ class SHAPPlotter:
         if save_path is not None:
             file_path = Path(save_path) / "shap_summary.png"
             plt.savefig(file_path, bbox_inches='tight', dpi=200)
-    
+
         self._maybe_show(show)
-    
+
         return top_features
