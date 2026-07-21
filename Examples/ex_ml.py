@@ -1,25 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-example_usage.py
-Minimal runnable example showing how to use ParallelModelTrainer + adapters.
-
-Covers:
-- A standard XGBoost multiclass setup (feature selection, scaling,
-  classes_to_save, repeated stratified CV).
-- How the new validation guards behave (classes_to_save, n_cores=0).
-- A fix for BrokenProcessPool / "task has failed to un-serialize" errors
-  that can occur on Windows when running under an embedded interpreter
-  (e.g. Spyder's IPython console), where sys.executable may not point
-  to the actual environment's python.exe that loky needs to spawn workers.
-
-Requires: scikit-learn, xgboost, joblib, tqdm, pandas, numpy
-(the same stack you already use).
+example_usage_simple.py
+Flat script version: no functions, everything at module level.
 """
 
+import os
 import sys
-import multiprocessing
 
-import numpy as np
+ML_ROOT = r"C:\Users\WKS\Github\ML"
+sys.path.insert(0, ML_ROOT)
+os.environ["PYTHONPATH"] = ML_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")
+
 import pandas as pd
 from sklearn.datasets import make_classification
 from sklearn.model_selection import RepeatedStratifiedKFold
@@ -30,91 +21,86 @@ from xgboost import XGBClassifier
 from trainer_v3 import ParallelModelTrainer
 
 
-def build_dataset():
-    """Synthetic 3-class dataset, just to make the example self-contained."""
-    X, y = make_classification(
-        n_samples=300,
-        n_features=20,
-        n_informative=8,
-        n_classes=3,
-        n_clusters_per_class=1,
-        random_state=0,
-    )
-    X = pd.DataFrame(X, columns=[f"feat_{i}" for i in range(X.shape[1])])
-    y = pd.Series(y, name="target")
-    return X, y
+# ------------------------------------------------------------------
+# PARAMETERS
+# ------------------------------------------------------------------
+N_SPLITS = 10
+N_REPEATS = 20
+RANDOM_STATE = 42
+
+SCALER = StandardScaler()
+
+MODEL = XGBClassifier(
+    n_estimators=100,
+    max_depth=3,
+    eval_metric="mlogloss",
+)
+
+BALANCER = None
+FEATURE_SELECTORS = [SelectKBest(score_func=f_classif, k=10)]
+CLASSES_TO_SAVE = [1, 2]
+N_CORES = -1
+MASTER_SEED = 42
+
+DEBUG_SEQUENTIAL = True   # <-- QUESTA è la riga importante per il test di oggi
 
 
-def main():
-    X, y = build_dataset()
+# ------------------------------------------------------------------
+# DATA
+# ------------------------------------------------------------------
+X, y = make_classification(
+    n_samples=300, n_features=20, n_informative=8,
+    n_classes=3, n_clusters_per_class=1, random_state=0,
+)
+X = pd.DataFrame(X, columns=[f"feat_{i}" for i in range(X.shape[1])])
+y = pd.Series(y, name="target")
 
-    rkf = RepeatedStratifiedKFold(n_splits=5, n_repeats=2, random_state=42)
 
-    trainer = ParallelModelTrainer(
-        X=X,
-        y=y,
-        rkf=rkf,
-        scaler=StandardScaler(),
-        model=XGBClassifier(
-            n_estimators=100,
-            max_depth=3,
-            eval_metric="mlogloss",
-        ),
-        balancer=None,  # e.g. imblearn.over_sampling.SMOTE() if needed
-        feature_selectors=[SelectKBest(score_func=f_classif, k=10)],
-        classes_to_save=[1, 2],  # valid: dataset has classes 0, 1, 2
-        n_cores=-1,              # use all available cores
-        master_seed=42,
-    )
+# ------------------------------------------------------------------
+# TRAINER SETUP + RUN
+# ------------------------------------------------------------------
+rkf = RepeatedStratifiedKFold(n_splits=N_SPLITS, n_repeats=N_REPEATS, random_state=RANDOM_STATE)
 
-    print("\n[RUN] Starting parallel repeated cross-validation...")
+trainer = ParallelModelTrainer(
+    X=X, y=y, rkf=rkf, scaler=SCALER, model=MODEL, balancer=BALANCER,
+    feature_selectors=FEATURE_SELECTORS, classes_to_save=CLASSES_TO_SAVE,
+    n_cores=N_CORES, master_seed=MASTER_SEED,
+)
+
+if DEBUG_SEQUENTIAL:
+    print("\n[DEBUG] Running folds sequentially (no joblib/loky)...")
+    n_splits = rkf.get_n_splits(trainer.X, trainer.y)
+    seeds = trainer._generate_seeds(n_splits)
+    results = []
+    for fold_idx, (train_idx, val_idx) in enumerate(rkf.split(trainer.X, trainer.y)):
+        print(f"--- Fold {fold_idx} ---")
+        r = trainer.process_fold(fold_idx, train_idx, val_idx, seeds[fold_idx])
+        results.append(r)
+        print(f"Fold {fold_idx} completato.")
+else:
     results = trainer.parallel_training()
 
-    outputs = trainer.get_all(results)
+outputs = trainer.get_all(results)
 
-    print("\n[OUTPUTS]")
-    print("Predictions shape:         ", outputs["predictions"].shape)
-    proba = outputs["predictions_proba"]
-    if isinstance(proba, list):
-        print("Predictions (proba) shapes:", [df.shape for df in proba])
-    else:
-        print("Predictions (proba) shape: ", proba.shape)
-    print("Feature selection shape:   ", outputs["feature_selection"].shape)
-    print("Feature importances shape: ", outputs["feature_importances"].shape)
-    print("Eval history folds:        ", len(outputs["eval_history"]))
-    print("\nHead of predictions:")
-    print(outputs["predictions"].head())
+predictions = outputs["predictions"]
+predictions_proba = outputs["predictions_proba"]
+feature_selection = outputs["feature_selection"]
+feature_importances = outputs["feature_importances"]
+eval_history = outputs["eval_history"]
+scaler_model = outputs["scaler_model"]
 
-
-def demo_validation_guards():
-    """Shows the new fail-fast behavior for invalid inputs (no training run)."""
-    X, y = build_dataset()
-    rkf = RepeatedStratifiedKFold(n_splits=5, n_repeats=1, random_state=42)
-
-    print("\n[DEMO] classes_to_save out of range:")
-    try:
-        ParallelModelTrainer(
-            X=X, y=y, rkf=rkf, scaler=StandardScaler(),
-            model=XGBClassifier(), classes_to_save=[5],  # only classes 0,1,2 exist
-        )
-    except ValueError as e:
-        print(f"  -> Raised as expected: {e}")
-
-    print("\n[DEMO] n_cores=0:")
-    try:
-        ParallelModelTrainer(
-            X=X, y=y, rkf=rkf, scaler=StandardScaler(),
-            model=XGBClassifier(), n_cores=0,
-        )
-    except ValueError as e:
-        print(f"  -> Raised as expected: {e}")
+print("\n[OUTPUTS]")
+print("Predictions shape:         ", predictions.shape)
+print("Feature selection shape:   ", feature_selection.shape)
+print("Feature importances shape: ", feature_importances.shape)
+print("Eval history folds:        ", len(eval_history))
 
 
-if __name__ == "__main__":
-    # Fix for BrokenProcessPool on Windows / embedded interpreters (e.g. Spyder):
-    # ensures loky spawns workers using the correct python.exe for this
-    # environment, instead of whatever sys.executable might otherwise resolve to.
-    multiprocessing.set_executable(sys.executable)
+# Questi sono sicuri da aprire nel Variable Explorer:
+predictions = outputs["predictions"]
+feature_importances = outputs["feature_importances"]
 
-    demo_validation_guards()
-    main()
+# Questo NON aprirlo nel Variable Explorer, ispezionalo da codice:
+scalers, models = zip(*outputs["scaler_model"])
+print(models[0])                          # rappresentazione testuale del primo modello
+print(models[0].feature_importances_)     # array numpy, sicuro da vedere

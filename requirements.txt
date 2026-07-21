@@ -23,4 +23,9 @@ imbalanced-learn>=0.12,<0.14
 
 # IDE integration: lets Spyder (installed in base) connect to this
 # environment's kernel. Not needed if you don't use Spyder.
-spyder-kernels>=2.5,<3.1
+# IMPORTANT: the version must match your Spyder version in `base` EXACTLY
+# (not just the major version) — check the error Spyder gives you if the
+# console fails to start, it states the exact range required.
+# Spyder 5.5.1 -> spyder-kernels 2.5.*
+# Spyder 6.1.0 -> spyder-kernels 3.1.*
+spyder-kernels==3.1.*

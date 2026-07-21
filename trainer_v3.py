@@ -15,6 +15,8 @@ Author: mik16
 """
 
 import pandas as pd
+pd.set_option("future.infer_string", False)
+
 import numpy as np
 import random
 from collections import namedtuple
@@ -302,7 +304,7 @@ class ParallelModelTrainer:
         n_folds = int(self.rkf.get_n_splits(self.X, self.y) / n_repeats)
 
         row_names = [
-            f"Iter_{r}_Fold_{f}"
+            f"iter_{r}_fold_{f}"
             for r in range(1, n_repeats + 1)
             for f in range(1, n_folds + 1)
         ]
@@ -329,8 +331,8 @@ class ParallelModelTrainer:
                 real_idx = self.y.index[pos]
                 predictions_dict[real_idx].append(result.y_pred[i])
         df_pred = pd.DataFrame.from_dict(predictions_dict, orient="index")
-        df_pred.insert(0, "Label", self.y)
-        df_pred.columns = ["Label"] + [f"Iter_{i+1}" for i in range(df_pred.shape[1] - 1)]
+        df_pred.insert(0, "label", self.y)
+        df_pred.columns = ["label"] + [f"iter_{i+1}" for i in range(df_pred.shape[1] - 1)]
         df_pred = df_pred.sort_index()
         return df_pred
 
@@ -355,8 +357,8 @@ class ParallelModelTrainer:
         df_list = []
         for class_idx in self.classes_to_save:
             df_class = pd.DataFrame.from_dict(predictions_proba_dict[class_idx], orient="index")
-            df_class.insert(0, "Label", self.y)
-            df_class.columns = ["Label"] + [f"Iter_{i+1}" for i in range(df_class.shape[1] - 1)]
+            df_class.insert(0, "label", self.y)
+            df_class.columns = ["label"] + [f"iter_{i+1}" for i in range(df_class.shape[1] - 1)]
             df_class = df_class.sort_index()
             df_list.append(df_class)
         return df_list[0] if len(df_list) == 1 else df_list
@@ -368,7 +370,8 @@ class ParallelModelTrainer:
             print("[INFO] No feature importances available.")
             return pd.DataFrame()
         df_importances = pd.DataFrame({r.fold_idx: r.feature_importances for r in valid_results}).T
-        df_importances.index.name = "Fold"
+        df_importances = df_importances.reindex(columns=self.X.columns)
+        df_importances.index.name = "fold"
         return df_importances
 
     def get_eval_history(self, results: List[FoldResult]) -> dict:
