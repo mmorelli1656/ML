@@ -316,68 +316,97 @@ class SHAPPlotter:
     def plot_summary_aggregated(
         self,
         max_display: int = 20,
+        min_selection_frac: float = 0.0,
         save_path: Optional[str] = None,
         show: Optional[bool] = None,
     ):
         """
         Plot an aggregated SHAP summary across all repetitions and folds.
-
-        This method concatenates SHAP values from all repetitions and folds,
-        fills NaNs with 0 (features not selected in some folds), and plots
-        the global summary plot using SHAP.
-
+    
+        NaNs (features not selected in a given fold) are excluded from the
+        importance ranking calculation rather than treated as zero
+        contribution, since the two cases are semantically different.
+        Only for the plot itself NaNs are filled with 0 (shap.summary_plot
+        requires a dense matrix), but the ranking uses nan-aware statistics.
+    
         Parameters
         ----------
         max_display : int, default=20
             Maximum number of features to display in the plot.
+        min_selection_frac : float, default=0.0
+            Minimum fraction of samples (across all repetitions/folds) for
+            which a feature must have a non-NaN SHAP value to be considered
+            in the ranking and shown in the plot. E.g. 0.5 keeps only
+            features selected in folds covering at least 50% of samples.
+            Default 0.0 keeps all features (no filtering), preserving
+            previous behaviour.
         save_path : str, optional
             If provided, saves the plot to the specified path.
         show : bool, optional
             Overrides the plotter's default `show` behaviour for this call.
-
+    
         Returns
         -------
         top_features : pd.DataFrame
-            DataFrame containing the top features ranked by mean absolute SHAP value.
+            DataFrame with columns "MeanAbsSHAP", "SelectionCount", and
+            "SelectionFrac", filtered by `min_selection_frac` and ranked
+            by MeanAbsSHAP descending.
         """
         self._check_computed()
-
+    
         shap_dict = self.handler.shap_dict_
         X = self.handler.X_
-
+    
         # Concatenate all repetitions
         df_shap_all = pd.concat([shap_dict[r] for r in shap_dict], axis=0)
-
-        # Use original feature values for plotting
-        df_features_all = X.loc[df_shap_all.index, df_shap_all.columns]
-
-        # Convert NaN to 0 for features not selected in some folds
-        shap_values_concatenated = df_shap_all.fillna(0).values
-        features_values = df_features_all.fillna(0).values
-
-        # Plot summary
+        n_total_samples = len(df_shap_all)
+    
+        # --- Ranking: ignore NaNs, don't treat them as zero contribution ---
+        mean_abs_shap = df_shap_all.abs().mean(axis=0, skipna=True)
+        selection_count = df_shap_all.notna().sum(axis=0)
+        selection_frac = selection_count / n_total_samples
+    
+        feature_importance = pd.DataFrame({
+            "MeanAbsSHAP": mean_abs_shap,
+            "SelectionCount": selection_count,
+            "SelectionFrac": selection_frac,
+        })
+    
+        # Apply threshold before ranking/truncating to max_display
+        kept_features = feature_importance[
+            feature_importance["SelectionFrac"] >= min_selection_frac
+        ].index
+    
+        if len(kept_features) == 0:
+            raise ValueError(
+                f"No feature meets min_selection_frac={min_selection_frac}. "
+                "Lower the threshold."
+            )
+    
+        top_features = feature_importance.loc[kept_features].sort_values(
+            by="MeanAbsSHAP", ascending=False
+        ).head(max_display)
+    
+        # --- Plot: only the surviving (and displayed) features ---
+        plotted_features = top_features.index
+        df_shap_plot = df_shap_all[plotted_features]
+        df_features_plot = X.loc[df_shap_plot.index, plotted_features]
+    
+        shap_values_concatenated = df_shap_plot.fillna(0).values
+        features_values = df_features_plot.fillna(0).values
+    
         plt.title("SHAP Summary Plot - Global case", fontsize=15, loc='center')
         shap.summary_plot(
             shap_values_concatenated,
             features_values,
-            feature_names=df_shap_all.columns,
+            feature_names=df_shap_plot.columns,
             max_display=max_display,
             show=False
         )
         if save_path is not None:
             file_path = Path(save_path) / "shap_summary.png"
             plt.savefig(file_path, bbox_inches='tight', dpi=200)
-
+    
         self._maybe_show(show)
-
-        # Compute mean absolute SHAP values for ranking
-        mean_abs_shap = np.mean(np.abs(shap_values_concatenated), axis=0)
-        feature_importance = pd.DataFrame(
-            {"MeanAbsSHAP": mean_abs_shap},
-            index=df_shap_all.columns
-        )
-        top_features = feature_importance.sort_values(
-            by="MeanAbsSHAP", ascending=False
-        ).head(max_display)
-
+    
         return top_features
