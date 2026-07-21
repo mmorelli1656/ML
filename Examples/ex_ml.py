@@ -96,4 +96,43 @@ print("Feature importances shape: ", feature_importances.shape)
 print("Eval history folds:        ", len(eval_history))
 
 
+#%%
 
+# ------------------------------------------------------------------
+# SHAP
+# ------------------------------------------------------------------
+from xai_shap import SHAPHandler, SHAPPlotter
+
+# Dataset has 3 classes -> target_class is REQUIRED (no safe default).
+# We compute and plot separately for each class we care about
+# (CLASSES_TO_SAVE), since aggregating multiclass SHAP values together
+# would mix signs across classes and produce a misleading ranking.
+
+top_features_per_class = {}
+shap_values_per_class = {}
+
+for target_class in CLASSES_TO_SAVE:
+    print(f"\n[SHAP] Computing for class {target_class}...")
+
+    shap_handler = SHAPHandler(
+        explainer_type="tree",   # XGBClassifier -> TreeExplainer
+        n_jobs=N_CORES,
+        parallel_level=None,
+    )
+    shap_values = shap_handler.compute_shap_values(
+        results, X, rkf,
+        use_scaled=True,          # XGBoost doesn't need scaling
+        target_class=target_class, # required: dataset has 3 classes
+    )
+    shap_values_per_class[target_class] = shap_values
+
+    shap_plotter = SHAPPlotter(shap_handler, show=True)
+    top_features = shap_plotter.plot_summary_aggregated(
+        max_display=10,
+        min_selection_frac=0.3,   # drop rarely-selected features
+        save_path=None,
+    )
+    top_features_per_class[target_class] = top_features
+
+    print(f"\nTop features for class {target_class}:")
+    print(top_features)
