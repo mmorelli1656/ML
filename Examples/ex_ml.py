@@ -42,7 +42,7 @@ CLASSES_TO_SAVE = [1, 2]
 N_CORES = -1
 MASTER_SEED = 42
 
-DEBUG_SEQUENTIAL = True   # <-- QUESTA è la riga importante per il test di oggi
+DEBUG_SEQUENTIAL = False   # <-- QUESTA è la riga importante per il test di oggi
 
 
 # ------------------------------------------------------------------
@@ -96,11 +96,4 @@ print("Feature importances shape: ", feature_importances.shape)
 print("Eval history folds:        ", len(eval_history))
 
 
-# Questi sono sicuri da aprire nel Variable Explorer:
-predictions = outputs["predictions"]
-feature_importances = outputs["feature_importances"]
 
-# Questo NON aprirlo nel Variable Explorer, ispezionalo da codice:
-scalers, models = zip(*outputs["scaler_model"])
-print(models[0])                          # rappresentazione testuale del primo modello
-print(models[0].feature_importances_)     # array numpy, sicuro da vedere
